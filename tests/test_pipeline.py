@@ -148,6 +148,26 @@ TXN_2027 = page("""
 """)
 
 
+GAMELOG_STARTER = page(table(
+    ["Date", "Opponent", "Score", "gs", "dec", "ip", "h", "r", "er", "bb", "k", "hr", "np"],
+    [
+        ["Jun 3", "at Ogden Raptors", "W, 5-2", 1, "W", "6.0", 4, 2, 2, 1, 8, 0, 92],
+        ["Jun 9", "vs. Missoula PaddleHeads", "L, 1-3", 1, "L", "5.2", 6, 3, 3, 2, 5, 1, 101],
+        ["Totals", "", "", 2, "", "11.2", 10, 5, 5, 3, 13, 1, 193],
+    ]))
+
+GAMELOG_HANSON = page(
+    "<h3>Hitting</h3>" + table(
+        ["Date", "Opponent", "Score", "ab", "r", "h", "2b", "3b", "hr", "rbi", "bb", "k", "sb"],
+        [
+            ["Jul 4", "vs. Boise Hawks", "W, 4-3", 4, 1, 2, 1, 0, 0, 1, 0, 1, 0],
+            ["Jul 4", "vs. Boise Hawks", "L, 2-6", 3, 0, 1, 0, 0, 1, 2, 1, 0, 1],
+        ])
+    + "<h3>Pitching</h3>" + table(
+        ["Date", "Opponent", "Score", "gs", "dec", "ip", "h", "r", "er", "bb", "k", "hr"],
+        [["Jul 8", "at Great Falls Voyagers", "W, 9-4", 0, "S", "1.1", 0, 0, 0, 0, 2, 0]]))
+
+
 class FakeHttp:
     def __init__(self):
         base = f"{SITE}{S}/players"
@@ -162,10 +182,14 @@ class FakeHttp:
         }
         for slug, html in ROSTERS.items():
             self.pages[f"{SITE}{S}/teams/{slug}?view=roster"] = html
+        self.pages[f"{SITE}{S}/players/noahstarter1a1?view=gamelog"] = GAMELOG_STARTER
+        self.pages[f"{SITE}{S}/players/chasehanson5m4?view=gamelog"] = GAMELOG_HANSON
         self.requested = []
 
     def get_text(self, url, **_):
         self.requested.append(url)
+        if "view=gamelog" in url and url not in self.pages:
+            return page("<p>No game log available.</p>")
         if url not in self.pages:
             raise RuntimeError(f"unexpected url {url}")
         return self.pages[url]
@@ -196,6 +220,23 @@ def test_stat_table_parsing_and_merge():
 def test_navigation_helpers():
     assert presto.discover_views(HIT_1, "h") == ["", "extended"]
     assert presto.page_count(HIT_1) == 2
+
+
+def test_gamelog_parsing():
+    games = presto.parse_gamelog(GAMELOG_STARTER, 2026)
+    assert len(games) == 2                                   # totals row skipped
+    g = games[0]
+    assert (g.group, g.game_date, g.opponent, g.home_away, g.decision, g.started) == \
+        ("p", date(2026, 6, 3), "Ogden Raptors", "A", "W", True)
+    assert g.stats["outs"] == 18 and g.stats["so"] == 8 and g.stats["pitches"] == 92
+    assert games[1].stats["outs"] == 17 and games[1].home_away == "H"
+
+    both = presto.parse_gamelog(GAMELOG_HANSON, 2026)
+    hit = [x for x in both if x.group == "h"]
+    pit = [x for x in both if x.group == "p"]
+    assert [x.game_no for x in hit] == [1, 2]                # doubleheader
+    assert hit[1].stats["hr"] == 1 and hit[1].stats["sb"] == 1
+    assert pit[0].started is False and pit[0].decision == "S" and pit[0].stats["outs"] == 4
 
 
 def test_roster_parsing():
@@ -338,6 +379,30 @@ def test_web_views(conn):
 
     f = conn.execute("SELECT * FROM ui_fielding_seasons WHERE position = 'SS'").fetchone()
     assert float(f["fpct"]) == 0.969
+
+
+def test_gamelogs_load_and_finished_seasons_skip(conn):
+    http = FakeHttp()
+    result = pioneer.run(conn, http, 2026, txn_seasons=(), target_season=2027)
+    gl = result["gamelogs"]
+    assert gl["players"] == 8 and gl["games"] == 5 and gl["empty"] == 6     # Hanson hits and pitches: 8 players
+
+    games = conn.execute("SELECT * FROM ui_pitching_games g JOIN players p ON p.id = g.player_id "
+                         "WHERE p.last_name = 'Starter' ORDER BY game_date").fetchall()
+    assert [float(g["ip"]) for g in games] == [6.0, 5.2]
+    assert games[0]["team"] == "Boise Hawks" and games[0]["started"] is True and games[0]["pitches"] == 92
+
+    s = conn.execute("SELECT games_logged FROM ui_pitching_seasons s JOIN players p ON p.id = s.player_id "
+                     "WHERE p.last_name = 'Starter'").fetchone()
+    assert s["games_logged"] == 2
+    dh = conn.execute("SELECT game_no, hr FROM ui_batting_games g JOIN players p ON p.id = g.player_id "
+                      "WHERE p.last_name = 'Hanson' ORDER BY game_no").fetchall()
+    assert [(r["game_no"], r["hr"]) for r in dh] == [(1, 0), (2, 1)]
+
+    # 2026 is finished (it is November), so players with logs are not fetched again
+    again = pioneer.run(conn, http, 2026, txn_seasons=(), target_season=2027)["gamelogs"]
+    assert again["skipped"] == 2 and again["fetched"] == 6
+    assert conn.execute("SELECT count(*) AS n FROM pitching_games").fetchone()["n"] == 3
 
 
 def test_refresh_reads_only_the_upcoming_report(conn):

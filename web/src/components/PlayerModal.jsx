@@ -4,6 +4,7 @@ import { FIELDING, HITTING, PITCHING } from '../data/columns.js'
 import { gridTheme, heightText, statColumns } from '../lib/grid.jsx'
 import MarkerButton from './MarkerButton.jsx'
 import StatusBadge, { statusDetail } from './StatusBadge.jsx'
+import GameLogModal from './GameLogModal.jsx'
 
 const VIEWS = [
   { key: 'batting', label: 'Batting', stats: HITTING },
@@ -22,7 +23,10 @@ export default function PlayerModal({ api, playerId, listRow, onClose, setMarker
   const [error, setError] = useState('')
   const [view, setView] = useState(startView)
   const [quick, setQuick] = useState('')
+  const [gameLog, setGameLog] = useState(null)          // { season, kind } while the game log is open
   const closeRef = useRef(null)
+  const gameLogOpen = useRef(false)
+  gameLogOpen.current = !!gameLog
 
   useEffect(() => {
     let alive = true
@@ -33,7 +37,8 @@ export default function PlayerModal({ api, playerId, listRow, onClose, setMarker
 
   useEffect(() => {
     closeRef.current?.focus()
-    const onKey = (e) => e.key === 'Escape' && onClose()
+    // Escape closes the game log first, then this pop up.
+    const onKey = (e) => e.key === 'Escape' && !gameLogOpen.current && onClose()
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -42,9 +47,12 @@ export default function PlayerModal({ api, playerId, listRow, onClose, setMarker
   const p = { ...(detail?.player ?? {}), ...(listRow ?? {}) }
   const rows = detail?.[view] ?? []
   const v = VIEWS.find((x) => x.key === view)
+  const canOpen = (r) => view !== 'fielding' && (r?.games_logged ?? 0) > 0
   const cols = useMemo(() => {
     const base = statColumns(v.stats, { showSeason: true, showTeam: true })
-    return base.map((c) => ({ ...c, pinned: c.field === 'season' ? 'left' : undefined }))
+    return base.map((c) => (c.field === 'season'
+      ? { ...c, pinned: 'left', width: 78, cellRenderer: SeasonCell }
+      : c))
   }, [v])
 
   const facts = [
@@ -104,13 +112,34 @@ export default function PlayerModal({ api, playerId, listRow, onClose, setMarker
           {detail && rows.length > 0 && (
             <AgGridReact theme={gridTheme} rowData={rows} columnDefs={cols} quickFilterText={quick}
               defaultColDef={{ sortable: true, resizable: true, suppressMovable: true }}
+              context={{ open: (r) => setGameLog({ season: r.season, kind: view }), canOpen }}
+              onRowClicked={(e) => canOpen(e.data) && setGameLog({ season: e.data.season, kind: view })}
+              getRowClass={(p) => (canOpen(p.data) ? 'row-openable' : '')}
               domLayout="autoHeight" tooltipShowDelay={300} />
           )}
         </div>
-        {detail && rows.some((r) => r.small_sample) && (
-          <p className="hint">Grey numbers are small samples: under 100 PA, or under 30 IP.</p>
+        {detail && rows.length > 0 && (
+          <p className="hint">
+            {view !== 'fielding' && rows.some(canOpen) && 'Click a season to see every game. '}
+            {view !== 'fielding' && rows.some((r) => !canOpen(r)) && 'Seasons without a link have no game log on file yet (college game logs are not loaded). '}
+            {rows.some((r) => r.small_sample) && 'Grey numbers are small samples: under 100 PA, or under 30 IP.'}
+          </p>
         )}
       </div>
+      {gameLog && (
+        <GameLogModal api={api} player={p} season={gameLog.season} kind={gameLog.kind} onClose={() => setGameLog(null)} />
+      )}
     </div>
+  )
+}
+
+// The season in each row. A link when that season has a game log.
+function SeasonCell({ data, context }) {
+  if (!context.canOpen(data)) return <span>{data.season}</span>
+  return (
+    <button type="button" className="seasonlink" title={`Show all ${data.games_logged} games`}
+      onClick={(e) => { e.stopPropagation(); context.open(data) }}>
+      {data.season}
+    </button>
   )
 }

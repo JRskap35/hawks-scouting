@@ -206,6 +206,19 @@ button, input, select { font: inherit; color: inherit; }
 .modal-bar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
 .quick { height: 34px; width: 240px; padding: 0 var(--s3); border: 1px solid #B9C5BC; border-radius: var(--radius); }
 .modal-grid { min-height: 80px; }
+.row-openable { cursor: pointer; }
+.seasonlink {
+  border: 0; background: none; padding: 0; cursor: pointer; font: 600 14px var(--f-data); color: var(--ink);
+  text-decoration: underline; text-decoration-color: var(--pole); text-decoration-thickness: 2px; text-underline-offset: 3px;
+}
+.modal-stack { z-index: 600; background: rgba(20, 31, 26, 0.35); padding-top: 9vh; }
+.modal-gamelog { width: min(1240px, 100%); }
+.modal-gamelog h2 { margin: 0; font: 700 28px/1.1 var(--f-cond); }
+.modal-gamelog .status-line { margin: 6px 0 0; }
+.gamelog-grid { height: min(62vh, 640px); }
+.gamelog-grid > div { height: 100%; }
+.row-totals { font-weight: 600; }
+.row-totals .ag-cell { background: #EEF2EE; }
 .modal-grid .ag-layout-auto-height .ag-center-cols-viewport,
 .modal-grid .ag-layout-auto-height .ag-center-cols-container { min-height: 0 !important; }
 .modal-grid .empty { height: auto; padding: var(--s5); }

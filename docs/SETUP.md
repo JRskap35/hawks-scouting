@@ -51,7 +51,11 @@ database:
 python cli.py doctor "https://www.pioneerleague.com/sports/bsb/2026/players?pos=h&r=0"
 ```
 
-You should see five players with team names and stats. Then load everything:
+You should see five players with team names and stats. To check game logs, open any player on the league
+site, copy his page address, add `?view=gamelog` to the end, and run `doctor` on it. You should see his
+games listed.
+
+Then load everything:
 
 ```bash
 python cli.py pioneer --season 2026
@@ -73,7 +77,8 @@ In Supabase **Authentication**:
 ### Commands
 
 ```bash
-python cli.py pioneer --season 2026    # full load
+python cli.py pioneer --season 2026    # full load, including game logs (one request per player)
+python cli.py pioneer --season 2026 --skip-gamelogs   # faster, no game logs
 python cli.py transactions             # 2027 transactions only
 python cli.py rebuild-status           # recompute every 2027 status
 python cli.py refresh                  # what the biweekly job runs

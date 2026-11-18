@@ -304,6 +304,48 @@ CREATE TABLE fielding_stats (
     UNIQUE (player_id, season, team_id, position)
 );
 
+-- Game logs: one row per player per game. Pulled from the player's game log page.
+-- game_no separates the two games of a doubleheader.
+CREATE TABLE batting_games (
+    id          bigserial PRIMARY KEY,
+    player_id   integer NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    season      smallint NOT NULL,
+    game_date   date NOT NULL,
+    game_no     smallint NOT NULL DEFAULT 1,
+    team_id     integer REFERENCES teams(id),
+    opponent    text,
+    home_away   char(1) CHECK (home_away IN ('H', 'A', 'N')),
+    result      text,                       -- as printed, e.g. 'W 7-3'
+    pa   smallint, ab  smallint, r   smallint, h   smallint, b2  smallint, b3 smallint, hr smallint,
+    rbi  smallint, bb  smallint, ibb smallint, so  smallint, hbp smallint, sf smallint, sh smallint,
+    sb   smallint, cs  smallint,
+    source_id   integer REFERENCES sources(id),
+    pulled_at   timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (player_id, game_date, game_no)
+);
+
+CREATE TABLE pitching_games (
+    id          bigserial PRIMARY KEY,
+    player_id   integer NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    season      smallint NOT NULL,
+    game_date   date NOT NULL,
+    game_no     smallint NOT NULL DEFAULT 1,
+    team_id     integer REFERENCES teams(id),
+    opponent    text,
+    home_away   char(1) CHECK (home_away IN ('H', 'A', 'N')),
+    result      text,
+    started     boolean,                    -- NULL when the source does not say
+    decision    text,                       -- 'W', 'L', 'S', 'H', 'BS'
+    outs integer, bf smallint, h smallint, r smallint, er smallint, hr smallint,
+    bb   smallint, ibb smallint, so smallint, hbp smallint, wp smallint, bk smallint,
+    pitches smallint, strikes smallint,
+    source_id   integer REFERENCES sources(id),
+    pulled_at   timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (player_id, game_date, game_no)
+);
+CREATE INDEX batting_games_season ON batting_games (player_id, season);
+CREATE INDEX pitching_games_season ON pitching_games (player_id, season);
+
 -- Sparse by nature. Only filled when a source actually publishes it.
 CREATE TABLE pitch_tracking (
     player_id   integer REFERENCES players(id) ON DELETE CASCADE,

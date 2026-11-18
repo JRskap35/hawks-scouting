@@ -68,6 +68,14 @@ function liveApi() {
       return { player: p.data, batting: b.data, pitching: pi.data, fielding: f.data }
     },
 
+    async loadGameLog(playerId, season, kind) {
+      const view = kind === 'pitching' ? 'ui_pitching_games' : 'ui_batting_games'
+      const { data, error } = await sb.from(view).select('*').eq('player_id', playerId).eq('season', season)
+        .order('game_date').order('game_no')
+      if (error) throw new Error(error.message)
+      return data
+    },
+
     // Returns the saved marker fields so every list can update without a reload.
     async setMarker(playerId, status) {
       if (!status) {
@@ -119,6 +127,7 @@ function demoApi() {
     loadPlayer: async (id) => ({
       player: byId.get(id), batting: d.batting[id] ?? [], pitching: d.pitching[id] ?? [], fielding: d.fielding[id] ?? [],
     }),
+    loadGameLog: async (id, season, kind) => (kind === 'pitching' ? d.pitchingGames : d.battingGames)[id]?.[season] ?? [],
     setMarker: async (id, status) => {
       const p = byId.get(id)
       Object.assign(p, status

@@ -89,6 +89,110 @@ function pitSeason(rand, season, team, league, starter, talent) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Game by game simulation for professional seasons. The season line is the sum of the
+// games, so the game log totals always match the season row, as they do with real data.
+// ---------------------------------------------------------------------------
+
+function seasonDates(rand, n, year, everyFew = 1) {
+  const start = Date.UTC(year, 4, 20), end = Date.UTC(year, 8, 6)
+  const days = Math.round((end - start) / 864e5)
+  const picked = new Set()
+  if (everyFew > 1) {
+    for (let d = Math.floor(rand() * 4); d <= days && picked.size < n; d += everyFew + Math.floor(rand() * 2)) picked.add(d)
+  }
+  while (picked.size < Math.min(n, days)) picked.add(Math.floor(rand() * days))
+  return [...picked].sort((a, b) => a - b).map((d) => new Date(start + d * 864e5).toISOString().slice(0, 10))
+}
+
+function gameShell(rand, date, team, opponents) {
+  const us = Math.floor(rand() * 9), them = Math.floor(rand() * 9)
+  const tie = us === them
+  const won = tie ? rand() < 0.5 : us > them
+  const hi = Math.max(us, them) + (tie ? 1 : 0), lo = Math.min(us, them)
+  return {
+    game_date: date, game_no: 1, team, opponent: opponents[Math.floor(rand() * opponents.length)],
+    home_away: rand() < 0.5 ? 'H' : 'A', result: `${won ? 'W' : 'L'} ${won ? hi : lo}-${won ? lo : hi}`, won,
+  }
+}
+
+function simHitGames(rand, year, team, opponents, talent) {
+  const n = 45 + Math.floor(rand() * 45)
+  return seasonDates(rand, n, year).map((date) => {
+    const g = { ...gameShell(rand, date, team, opponents), pa: 0, ab: 0, r: 0, h: 0, b2: 0, b3: 0, hr: 0, rbi: 0, bb: 0, so: 0, hbp: 0, sf: 0, sb: 0, cs: 0 }
+    const pas = 3 + Math.floor(rand() * 3)
+    for (let i = 0; i < pas; i++) {
+      g.pa++
+      const x = rand()
+      const bb = 0.085 + 0.02 * talent, hbp = 0.012, so = 0.22 - 0.03 * talent, hr = 0.025 + 0.015 * talent
+      if (x < bb) g.bb++
+      else if (x < bb + hbp) g.hbp++
+      else if (x < bb + hbp + 0.008) { g.sf++; g.rbi++ }
+      else {
+        g.ab++
+        const y = rand()
+        if (y < so) g.so++
+        else if (y < so + hr) { g.h++; g.hr++; g.r++; g.rbi += 1 + Math.floor(rand() * 2) }
+        else if (y < so + hr + 0.005) { g.h++; g.b3++ }
+        else if (y < so + hr + 0.05) { g.h++; g.b2++ }
+        else if (y < so + hr + 0.21 + 0.03 * talent) g.h++
+      }
+    }
+    g.r += rand() < 0.3 ? 1 : 0
+    g.rbi += g.h > 0 && rand() < 0.3 ? 1 : 0
+    if (rand() < 0.12) g.sb++
+    if (rand() < 0.03) g.cs++
+    delete g.won
+    return g
+  })
+}
+
+function simPitchGames(rand, year, team, opponents, starter, talent, minGames = 0) {
+  const n = Math.max(minGames, starter ? 12 + Math.floor(rand() * 7) : 18 + Math.floor(rand() * 18))
+  return seasonDates(rand, n, year, starter ? 5 : 1).map((date) => {
+    const shell = gameShell(rand, date, team, opponents)
+    const g = { ...shell, started: starter, decision: null, outs: 0, bf: 0, h: 0, r: 0, er: 0, hr: 0, bb: 0, so: 0, hbp: 0, wp: 0 }
+    const target = starter ? 12 + Math.floor(rand() * 10) : 2 + Math.floor(rand() * 5)
+    let traffic = 0
+    while (g.outs < target && g.bf < 40) {
+      g.bf++
+      const x = rand()
+      const so = 0.23 + 0.03 * talent, bb = 0.085 - 0.01 * talent, hr = 0.024
+      if (x < so) { g.so++; g.outs++ }
+      else if (x < so + bb) { g.bb++; traffic++ }
+      else if (x < so + bb + 0.01) { g.hbp++; traffic++ }
+      else if (x < so + bb + 0.01 + hr) { g.h++; g.hr++; g.er += 1 + Math.min(traffic, 2); traffic = 0 }
+      else if (x < so + bb + 0.01 + hr + 0.2) { g.h++; traffic++; if (traffic >= 3) { g.er++; traffic-- } }
+      else g.outs++
+    }
+    g.r = g.er + (rand() < 0.12 ? 1 : 0)
+    if (rand() < 0.08) g.wp++
+    g.pitches = Math.round(g.bf * (3.6 + rand() * 0.6))
+    g.strikes = Math.round(g.pitches * (0.6 + rand() * 0.06))
+    g.decision = starter
+      ? (g.outs >= 15 && shell.won && rand() < 0.7 ? 'W' : !shell.won && rand() < 0.5 ? 'L' : null)
+      : (shell.won && rand() < 0.15 ? 'S' : shell.won && rand() < 0.15 ? 'H' : !shell.won && rand() < 0.08 ? 'L' : null)
+    delete g.won
+    return { ...g, ip: Math.floor(g.outs / 3) + (g.outs % 3) / 10 }
+  })
+}
+
+const sum = (rows, k) => rows.reduce((t, r) => t + (r[k] ?? 0), 0)
+
+function battingFromGames(games, season, team, league) {
+  const t = Object.fromEntries(['pa', 'ab', 'r', 'h', 'b2', 'b3', 'hr', 'rbi', 'bb', 'so', 'hbp', 'sf', 'sb', 'cs'].map((k) => [k, sum(games, k)]))
+  return battingRates({ season, teams: team, leagues: league, g: games.length, ...t, games_logged: games.length })
+}
+
+function pitchingFromGames(games, season, team, league) {
+  const t = Object.fromEntries(['outs', 'bf', 'h', 'r', 'er', 'hr', 'bb', 'so', 'hbp'].map((k) => [k, sum(games, k)]))
+  return pitchingRates({
+    season, teams: team, leagues: league, g: games.length, gs: games.filter((x) => x.started).length,
+    w: games.filter((x) => x.decision === 'W').length, l: games.filter((x) => x.decision === 'L').length,
+    sv: games.filter((x) => x.decision === 'S').length, ...t, games_logged: games.length,
+  })
+}
+
 export function buildDemo(seed = 2027) {
   const rand = rng(seed)
   const pick = (a) => a[Math.floor(rand() * a.length)]
@@ -102,6 +206,7 @@ export function buildDemo(seed = 2027) {
 
   const players = []
   const batting = {}, pitching = {}, fielding = {}
+  const battingGames = {}, pitchingGames = {}        // [playerId][season] -> games
   let id = 1
 
   const make = (kind) => {
@@ -140,8 +245,17 @@ export function buildDemo(seed = 2027) {
     }
     const recent = seasons.slice(-3 - Math.floor(rand() * 2))
 
+    const opponents = INDY.filter((t) => t !== team)
+    const isPro = (s) => s.league === 'Pioneer League'
+
     if (kind !== 'P') {
-      batting[p.id] = recent.map((s) => hitSeason(rand, s.y, s.team, s.league, talent)).reverse()
+      battingGames[p.id] = {}
+      batting[p.id] = recent.map((s) => {
+        if (!isPro(s)) return hitSeason(rand, s.y, s.team, s.league, talent)
+        const games = simHitGames(rand, s.y, s.team, opponents, talent)
+        battingGames[p.id][s.y] = games
+        return battingFromGames(games, s.y, s.team, s.league)
+      }).reverse()
       fielding[p.id] = recent.map((s) => {
         const g = batting[p.id].find((b) => b.season === s.y).g
         const po = Math.floor(g * (pos === 'C' ? 7 : pos === '1B' ? 8 : 2) * (0.8 + rand() * 0.4))
@@ -156,14 +270,22 @@ export function buildDemo(seed = 2027) {
     }
     if (kind !== 'H') {
       const starter = kind === 'P' ? rand() < 0.45 : rand() < 0.3
-      pitching[p.id] = recent.map((s) => pitSeason(rand, s.y, s.team, s.league, starter, talent)).reverse()
+      pitchingGames[p.id] = {}
+      pitching[p.id] = recent.map((s, i) => {
+        if (!isPro(s)) return pitSeason(rand, s.y, s.team, s.league, starter, talent)
+        // two way players get enough relief outings to clear 20 IP in their latest season
+        const minGames = kind === 'TW' && i === recent.length - 1 ? 24 : 0
+        const games = simPitchGames(rand, s.y, s.team, opponents, starter, talent, minGames)
+        pitchingGames[p.id][s.y] = games
+        return pitchingFromGames(games, s.y, s.team, s.league)
+      }).reverse()
       const ps = pitching[p.id].slice(0, 3)
       const w = [3, 2, 1]
       const share = ps.reduce((t, s, i) => t + w[i] * s.gs, 0) / ps.reduce((t, s, i) => t + w[i] * s.g, 0)
       p.pitcher_role = share >= 0.5 ? 'SP' : 'RP'
-      if (kind === 'TW') {
-        // keep two way pitching samples real: at least 20 IP in the latest season
-        pitching[p.id][0] = pitchingRates({ ...pitching[p.id][0], outs: Math.max(pitching[p.id][0].outs, 75) })
+      if (kind === 'TW' && pitching[p.id][0].outs < 60) {
+        // a two way player who is still a college grad: keep his pitching sample over 20 IP
+        pitching[p.id][0] = pitchingRates({ ...pitching[p.id][0], outs: 75, bf: 100 })
       }
     }
     // Team column: 2027 club if signed, otherwise the last professional team, otherwise none.
@@ -184,5 +306,5 @@ export function buildDemo(seed = 2027) {
     p.marker_set_by = ['Joe', 'Area scout', 'Pitching coach'][i % 3]
   })
 
-  return { players, batting, pitching, fielding }
+  return { players, batting, pitching, fielding, battingGames, pitchingGames }
 }

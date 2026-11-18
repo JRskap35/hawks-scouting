@@ -12,7 +12,8 @@
 
 -- Views are dropped and rebuilt so this file can be rerun after any change to them.
 DROP VIEW IF EXISTS ui_two_way, ui_pitchers, ui_hitters, ui_players, ui_fielding_seasons,
-                    ui_pitching_seasons, ui_batting_seasons, league_fip_constants CASCADE;
+                    ui_pitching_seasons, ui_batting_seasons, ui_batting_games, ui_pitching_games,
+                    league_fip_constants CASCADE;
 
 
 -- ------------------------------------------------------------
@@ -86,7 +87,8 @@ SELECT r.*,
        ROUND((h - hr)::numeric / NULLIF(ab - so - hr + sf, 0), 3) AS babip,
        ROUND(100.0 * so / NULLIF(pa, 0), 1) AS k_pct,
        ROUND(100.0 * bb / NULLIF(pa, 0), 1) AS bb_pct,
-       (pa < 100) AS small_sample
+       (pa < 100) AS small_sample,
+       (SELECT count(*) FROM batting_games g WHERE g.player_id = r.player_id AND g.season = r.season) AS games_logged
 FROM raw r;
 
 CREATE OR REPLACE VIEW ui_pitching_seasons WITH (security_invoker = true) AS
@@ -123,7 +125,8 @@ SELECT player_id, season, teams, leagues, w, l, g, gs, sv, outs, bf, h, r, er, h
        ROUND(100.0 * bb / NULLIF(bf, 0), 1) AS bb_pct,
        ROUND(100.0 * (so - bb) / NULLIF(bf, 0), 1) AS k_bb_pct,
        ROUND((13.0 * hr + 3.0 * (bb + hbp) - 2.0 * so) / NULLIF(outs / 3.0, 0) + fip_c, 2) AS fip,
-       (outs < 90) AS small_sample                                -- under 30 IP
+       (outs < 90) AS small_sample,                               -- under 30 IP
+       (SELECT count(*) FROM pitching_games g WHERE g.player_id = raw.player_id AND g.season = raw.season) AS games_logged
 FROM raw;
 
 CREATE OR REPLACE VIEW ui_fielding_seasons WITH (security_invoker = true) AS
@@ -136,6 +139,26 @@ SELECT f.player_id, f.season, f.position,
 FROM fielding_stats f
 JOIN teams t ON t.id = f.team_id
 GROUP BY f.player_id, f.season, f.position;
+
+
+-- ------------------------------------------------------------
+-- Game logs as the site shows them
+-- ------------------------------------------------------------
+
+CREATE OR REPLACE VIEW ui_batting_games WITH (security_invoker = true) AS
+SELECT g.id, g.player_id, g.season, g.game_date, g.game_no, t.name AS team, g.opponent, g.home_away, g.result,
+       COALESCE(g.pa, g.ab + COALESCE(g.bb,0) + COALESCE(g.hbp,0) + COALESCE(g.sf,0) + COALESCE(g.sh,0)) AS pa,
+       g.ab, g.r, g.h, g.b2, g.b3, g.hr, g.rbi, g.bb, g.so, g.hbp, g.sf, g.sb, g.cs
+FROM batting_games g
+LEFT JOIN teams t ON t.id = g.team_id;
+
+CREATE OR REPLACE VIEW ui_pitching_games WITH (security_invoker = true) AS
+SELECT g.id, g.player_id, g.season, g.game_date, g.game_no, t.name AS team, g.opponent, g.home_away, g.result,
+       g.started, g.decision, g.outs,
+       (g.outs / 3) + (g.outs % 3) / 10.0 AS ip,
+       g.bf, g.h, g.r, g.er, g.hr, g.bb, g.so, g.hbp, g.wp, g.pitches, g.strikes
+FROM pitching_games g
+LEFT JOIN teams t ON t.id = g.team_id;
 
 
 -- ------------------------------------------------------------

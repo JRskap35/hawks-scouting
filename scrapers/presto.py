@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -306,3 +307,112 @@ def split_name(full: str) -> tuple[str, str]:
     if parts[-1].rstrip(".").lower() in {"jr", "sr", "ii", "iii", "iv"} and len(parts) > 2:
         return " ".join(parts[:-2]), " ".join(parts[-2:])
     return " ".join(parts[:-1]), parts[-1]
+
+
+# ---------------------------------------------------------------------------
+# Game logs
+#   Player page, game log view: /sports/bsb/{season}/players/{slug}?view=gamelog
+#   A page can hold a hitting table, a pitching table, or both. Each is told apart by its headers.
+# ---------------------------------------------------------------------------
+
+GAMELOG_DATE = {"date", "game date"}
+GAMELOG_OPP = {"opponent", "opp", "opponent/event", "vs", "matchup"}
+GAMELOG_RESULT = {"score", "result", "w/l", "res"}
+GAMELOG_DECISION = {"dec", "decision", "w/l/s", "w-l-s"}
+GAMELOG_PITCH_EXTRA = {"np": "pitches", "pc": "pitches", "pitches": "pitches", "#p": "pitches",
+                       "str": "strikes", "strikes": "strikes", "s": "strikes"}
+
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+@dataclass
+class GameRow:
+    group: str                    # 'h' or 'p'
+    game_date: date
+    game_no: int
+    opponent: Optional[str]
+    home_away: Optional[str]      # 'H', 'A', or None
+    result: Optional[str]
+    decision: Optional[str] = None
+    started: Optional[bool] = None
+    stats: dict = field(default_factory=dict)
+
+
+def parse_game_date(text: str, season: int):
+    """'Jun 3', 'June 3', '6/3', '6/3/2026', '06/03/26', 'Jun 3, 2026' -> date. None if not a date."""
+    t = text.strip().lower().replace(".", "")
+    m = re.match(r"^(?:[a-z]{3,9},?\s+)?([a-z]{3,9})\s+(\d{1,2})(?:,?\s+(\d{4}))?", t)      # optional weekday first
+    if m and m.group(1)[:3] in _MONTHS:
+        month, day, year = _MONTHS[m.group(1)[:3]], int(m.group(2)), int(m.group(3) or season)
+    else:
+        m = re.match(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", t)
+        if not m:
+            return None
+        month, day = int(m.group(1)), int(m.group(2))
+        year = int(m.group(3)) if m.group(3) else season
+        year = year + 2000 if year < 100 else year
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def split_opponent(text: str) -> tuple[Optional[str], Optional[str]]:
+    """'at Ogden Raptors' -> ('Ogden Raptors', 'A'); 'vs. Boise Hawks' -> ('Boise Hawks', 'H')."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    if not t:
+        return None, None
+    m = re.match(r"^(at|@)\s+(.*)$", t, re.I)
+    if m:
+        return m.group(2).strip(), "A"
+    m = re.match(r"^(vs\.?|v\.?)\s+(.*)$", t, re.I)
+    if m:
+        return m.group(2).strip(), "H"
+    return t, None
+
+
+def parse_gamelog(html: str, season: int) -> list[GameRow]:
+    soup = BeautifulSoup(html, "lxml")
+    out: list[GameRow] = []
+    for table in soup.find_all("table"):
+        headers = _headers(table)
+        hs = set(headers)
+        if not (hs & GAMELOG_DATE):
+            continue
+        group = "p" if "ip" in hs else "h" if "ab" in hs else None
+        if not group:
+            continue
+        aliases = dict(GROUP_ALIASES[group])
+        if group == "p":
+            aliases.update(GAMELOG_PITCH_EXTRA)
+            aliases.pop("gs", None)        # in a game log, GS means "started this game", handled below
+            aliases.pop("g", None)
+            aliases.pop("app", None)
+
+        per_date: dict = {}
+        for tr in _body_rows(table):
+            cells = tr.find_all(["td", "th"])
+            if len(cells) < 3:
+                continue
+            vals = {headers[i]: cells[i].get_text(" ", strip=True) for i in range(min(len(headers), len(cells)))}
+            d_text = next((vals[h] for h in headers if h in GAMELOG_DATE), "")
+            gdate = parse_game_date(d_text, season)
+            if gdate is None:
+                continue                    # totals and repeated header rows
+            per_date[gdate] = per_date.get(gdate, 0) + 1
+            opp, ha = split_opponent(next((vals[h] for h in headers if h in GAMELOG_OPP), ""))
+            row = GameRow(group, gdate, per_date[gdate], opp, ha,
+                          result=next((vals[h] for h in headers if h in GAMELOG_RESULT), None) or None)
+            if group == "p":
+                row.decision = (next((vals[h] for h in headers if h in GAMELOG_DECISION), "") or "").strip(" -") or None
+                if "gs" in vals:
+                    row.started = (to_int(vals["gs"]) or 0) > 0
+            for h, text in vals.items():
+                col = aliases.get(h)
+                if not col or col in row.stats:
+                    continue
+                val = innings_to_outs(text) if col == "outs" else to_int(text)
+                if val is not None:
+                    row.stats[col] = val
+            out.append(row)
+    return out

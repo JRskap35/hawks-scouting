@@ -7,6 +7,7 @@ Command line entry point.
     python cli.py rebuild-status              recompute every player's signing status
     python cli.py refresh                     what the two week schedule runs
     python cli.py doctor <url>                show what the parser sees on a page (no database needed)
+                                              works on stat lists, rosters, game logs, and transaction pages
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ def cmd_pioneer(args):
         # forward. Statuses themselves are computed for the upcoming season only.
         txn = () if args.skip_transactions else (args.season, pioneer.transaction_season())
         result = pioneer.run(conn, PoliteSession(), args.season,
-                             rosters=not args.skip_rosters, txn_seasons=txn)
+                             rosters=not args.skip_rosters, txn_seasons=txn, gamelogs=not args.skip_gamelogs)
     print(json.dumps(result, indent=2, default=str))
 
 
@@ -96,6 +97,13 @@ def cmd_doctor(args):
         for r in roster[:5]:
             print(f"  {r.name:<24} {r.fields}")
 
+    games = presto.parse_gamelog(html, args.season or current_season())
+    if games:
+        print(f"\ngame log rows parsed: {len(games)}")
+        for g in games[:8]:
+            side = {"H": "vs", "A": "at"}.get(g.home_away, "")
+            print(f"  {g.game_date} {g.group} {side} {g.opponent or '?':<22} {g.result or '':<8} {g.decision or '':<3} {g.stats}")
+
     if "transaction" in args.url:
         from scrapers.transactions import parse_report
         parsed = parse_report(pioneer.report_lines(html), args.season or current_season())
@@ -115,6 +123,7 @@ def main(argv=None):
     s.add_argument("--season", type=int, default=current_season())
     s.add_argument("--skip-rosters", action="store_true")
     s.add_argument("--skip-transactions", action="store_true")
+    s.add_argument("--skip-gamelogs", action="store_true", help="skip the one request per player for game logs")
     s.set_defaults(fn=cmd_pioneer)
 
     s = sub.add_parser("transactions")

@@ -192,6 +192,44 @@ def upsert_fielding(conn, player_id, season, team_id, position, stats, source_id
                   stats, source_id)
 
 
+BAT_GAME_COLS = ["pa", "ab", "r", "h", "b2", "b3", "hr", "rbi", "bb", "ibb", "so", "hbp", "sf", "sh", "sb", "cs"]
+PIT_GAME_COLS = ["outs", "bf", "h", "r", "er", "hr", "bb", "ibb", "so", "hbp", "wp", "bk", "pitches", "strikes"]
+
+
+def upsert_game(conn, g, player_id: int, season: int, team_id, source_id: int):
+    """One game log row. g is a presto.GameRow."""
+    table, cols = ("batting_games", BAT_GAME_COLS) if g.group == "h" else ("pitching_games", PIT_GAME_COLS)
+    base = {"player_id": player_id, "season": season, "game_date": g.game_date, "game_no": g.game_no,
+            "team_id": team_id, "opponent": g.opponent, "home_away": g.home_away, "result": g.result}
+    if g.group == "p":
+        base.update({"started": g.started, "decision": g.decision})
+    stats = {c: g.stats[c] for c in cols if c in g.stats}
+    names = [*base.keys(), *stats.keys(), "source_id"]
+    values = [*base.values(), *stats.values(), source_id]
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in names if c not in ("player_id", "game_date", "game_no"))
+    conn.execute(
+        f"""INSERT INTO {table} ({', '.join(names)}) VALUES ({', '.join(['%s'] * len(values))})
+            ON CONFLICT (player_id, game_date, game_no) DO UPDATE SET {updates}, pulled_at = now()""",
+        values)
+
+
+def has_games(conn, player_id: int, season: int) -> bool:
+    row = conn.execute(
+        """SELECT EXISTS (SELECT 1 FROM batting_games WHERE player_id = %s AND season = %s)
+               OR EXISTS (SELECT 1 FROM pitching_games WHERE player_id = %s AND season = %s) AS has""",
+        (player_id, season, player_id, season)).fetchone()
+    return bool(row["has"])
+
+
+def single_team(conn, player_id: int, season: int):
+    """The player's team that season, or None if he played for more than one."""
+    rows = conn.execute(
+        """SELECT DISTINCT team_id FROM batting_stats WHERE player_id = %s AND season = %s
+           UNION SELECT DISTINCT team_id FROM pitching_stats WHERE player_id = %s AND season = %s""",
+        (player_id, season, player_id, season)).fetchall()
+    return rows[0]["team_id"] if len(rows) == 1 else None
+
+
 # ---------------------------------------------------------------------------
 # Transactions and status
 # ---------------------------------------------------------------------------

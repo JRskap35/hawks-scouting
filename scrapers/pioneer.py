@@ -35,6 +35,7 @@ class LeagueConfig:
     level: str
     site: str
     stats_path: str = "/sports/bsb/{season}/players"
+    gamelog_path: str = "/sports/bsb/{season}/players/{slug}?view=gamelog"
     transactions_archive: str = ""              # one season's report, {season} is filled in
     transactions_current: tuple[str, ...] = ()  # the live report, only valid for the current transaction season
 
@@ -250,12 +251,60 @@ def load_transactions(conn, http: PoliteSession, cfg: LeagueConfig, season: int,
 
 
 # ---------------------------------------------------------------------------
+# Game logs
+# ---------------------------------------------------------------------------
+
+def season_is_live(season: int, today: date | None = None) -> bool:
+    """Games are still being added May through September of that season."""
+    today = today or date.today()
+    return today.year == season and 5 <= today.month <= 9
+
+
+def load_gamelogs(conn, http: PoliteSession, cfg: LeagueConfig, season: int, source_id: int, tally: dict,
+                  force: bool = False) -> dict:
+    """
+    One request per player. A finished season is fetched once and then skipped, so the
+    biweekly refresh does not re-download hundreds of pages that cannot change.
+    """
+    players = conn.execute(
+        """SELECT x.player_id, x.external_id FROM player_external_ids x
+           WHERE x.source_id = %s AND x.player_id IN (
+               SELECT player_id FROM batting_stats WHERE season = %s
+               UNION SELECT player_id FROM pitching_stats WHERE season = %s)
+           ORDER BY x.player_id""", (source_id, season, season)).fetchall()
+    live = season_is_live(season)
+    summary = {"players": len(players), "fetched": 0, "skipped": 0, "games": 0, "empty": 0}
+    for row in players:
+        pid = row["player_id"]
+        if not force and not live and db.has_games(conn, pid, season):
+            summary["skipped"] += 1
+            continue
+        url = cfg.site + cfg.gamelog_path.format(season=season, slug=row["external_id"])
+        try:
+            games = presto.parse_gamelog(http.get_text(url), season)
+        except Exception as e:                       # one bad page should not stop the run
+            tally["errors"].append(f"game log {row['external_id']}: {e!r}")
+            continue
+        summary["fetched"] += 1
+        if not games:
+            summary["empty"] += 1
+            continue
+        team_id = db.single_team(conn, pid, season)
+        for g in games:
+            db.upsert_game(conn, g, pid, season, team_id, source_id)
+        summary["games"] += len(games)
+        tally["rows"] += len(games)
+        conn.commit()
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # Full run
 # ---------------------------------------------------------------------------
 
 def run(conn, http: PoliteSession, season: int, cfg: LeagueConfig = PIONEER,
         rosters: bool = True, txn_seasons: tuple[int, ...] | None = None,
-        target_season: int | None = None) -> dict:
+        target_season: int | None = None, gamelogs: bool = True) -> dict:
     """
     season         stats and roster season (rosters are read for names and bio only)
     txn_seasons    transaction reports to load; default is just the upcoming season's
@@ -273,6 +322,8 @@ def run(conn, http: PoliteSession, season: int, cfg: LeagueConfig = PIONEER,
         result["teams"] = len(teams)
         if rosters:
             load_rosters(conn, http, cfg, season, source_id, league_id, teams, tally)
+        if gamelogs:
+            result["gamelogs"] = load_gamelogs(conn, http, cfg, season, source_id, tally)
         result["transactions"] = {}
         if txn_seasons:
             for txn_season in dict.fromkeys(txn_seasons):
