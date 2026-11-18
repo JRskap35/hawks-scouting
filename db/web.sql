@@ -10,6 +10,11 @@
 -- ============================================================
 
 
+-- Views are dropped and rebuilt so this file can be rerun after any change to them.
+DROP VIEW IF EXISTS ui_two_way, ui_pitchers, ui_hitters, ui_players, ui_fielding_seasons,
+                    ui_pitching_seasons, ui_batting_seasons, league_fip_constants CASCADE;
+
+
 -- ------------------------------------------------------------
 -- Marker history: every change to player_markers is logged automatically
 -- ------------------------------------------------------------
@@ -150,6 +155,10 @@ SELECT e.id, e.first_name, e.last_name, e.full_name,
        concat_ws(', ', e.hometown_city, e.hometown_state) AS hometown,
        e.grad_year,
        col.name AS college,
+       -- Team column: his 2027 club if signed, otherwise the last professional team he played for.
+       COALESCE(CASE WHEN e.status = 'signed_independent' THEN ct.name END, lp.team_name) AS team,
+       lp.team_name AS last_pro_team,
+       lp.season AS last_pro_season,
        e.status,
        CASE e.status
            WHEN 'free_agent' THEN 'Free Agent'
@@ -170,7 +179,17 @@ FROM eligible_players e
 LEFT JOIN teams col ON col.id = e.college_team_id
 LEFT JOIN teams ct ON ct.id = e.current_team_id
 LEFT JOIN player_markers m ON m.player_id = e.id
-LEFT JOIN staff st ON st.user_id = m.set_by;
+LEFT JOIN staff st ON st.user_id = m.set_by
+LEFT JOIN LATERAL (
+    SELECT t.name AS team_name, s.season
+    FROM (SELECT player_id, season, team_id, COALESCE(g, 0) AS g FROM batting_stats WHERE split = 'total'
+          UNION ALL
+          SELECT player_id, season, team_id, COALESCE(g, 0) AS g FROM pitching_stats WHERE split = 'total') s
+    JOIN teams t ON t.id = s.team_id AND t.org <> 'college'
+    WHERE s.player_id = e.id
+    ORDER BY s.season DESC, s.g DESC
+    LIMIT 1
+) lp ON true;
 
 
 -- Each list page shows a player's most recent season. The pop up shows every season.

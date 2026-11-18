@@ -307,6 +307,10 @@ def test_web_views(conn):
     t = hit["Trimble"]
     assert (t["position_group"], t["status_label"], t["status_team"]) == ("IF", "Signed", "Idaho Falls Chukars")
     assert hit["Shaver"]["status_label"] == "Unconfirmed"
+    # Team: 2027 club when signed, otherwise last professional team
+    assert t["team"] == "Idaho Falls Chukars"
+    assert hit["Shaver"]["team"] == "Billings Mustangs"
+    assert pit["Womble"]["team"] == "Yuba-Sutter Freebirds"
     assert hit["Hanson"]["status_label"] == "Free Agent"
     assert hit["Hanson"]["position_group"] == "OF"                 # roster says OF/RHP
     # .353 / (120+45+8)/(340+45+8+4) / (120+30+4+66)/340

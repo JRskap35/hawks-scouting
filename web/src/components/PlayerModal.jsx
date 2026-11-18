@@ -43,7 +43,7 @@ export default function PlayerModal({ api, playerId, listRow, onClose, setMarker
   const rows = detail?.[view] ?? []
   const v = VIEWS.find((x) => x.key === view)
   const cols = useMemo(() => {
-    const base = statColumns(v.stats, { showSeason: true })
+    const base = statColumns(v.stats, { showSeason: true, showTeam: true })
     return base.map((c) => ({ ...c, pinned: c.field === 'season' ? 'left' : undefined }))
   }, [v])
 

@@ -48,28 +48,47 @@ function MarkerCell({ data, context }) {
   return <MarkerButton player={data} onChange={context.setMarker} />
 }
 
-// Columns every list starts with, in the order the instructions set:
-// marker, name with badge, graduation year, college, then the rest.
-// On phones the name column scrolls with the stats instead of staying pinned, so the numbers get the room.
-export function leadColumns(narrow = false) {
+function TeamCell({ value }) {
+  return value ? <span>{value}</span> : <span className="none">None</span>
+}
+
+export const collegeText = (r) => (r.college ? `${r.college}${r.grad_year ? ` (${r.grad_year})` : ''}` : '')
+
+// Columns every list starts with:
+// marker, name with badge, team, college with graduation year, position, bats, throws.
+export function leadColumns(narrow = false, { role = false } = {}) {
   const pin = narrow ? undefined : 'left'
-  return [
+  const cols = [
     { headerName: '', field: 'marker', width: 52, pinned: pin, sortable: true, resizable: false,
       cellRenderer: MarkerCell, cellClass: 'cell-marker', comparator: nullsLast, headerTooltip: 'Marker',
       exportValue: (r) => markerLabel(r.marker) },
-    { headerName: 'Player', field: 'full_name', width: 250, pinned: pin, cellRenderer: NameCell,
+    { headerName: 'Name', field: 'full_name', width: 250, pinned: pin, cellRenderer: NameCell,
       comparator: (a, b, na, nb) => (na.data.last_name ?? '').localeCompare(nb.data.last_name ?? ''),
       exportValue: (r) => r.full_name, exportExtra: [{ label: 'Status', value: (r) => r.status_label }] },
-    { headerName: 'Grad', field: 'grad_year', width: 70, comparator: nullsLast, headerTooltip: 'Graduation year' },
-    { headerName: 'College', field: 'college', width: 160, comparator: nullsLast },
-    { headerName: 'Pos', field: 'primary_position', width: 66, comparator: nullsLast },
+    { headerName: 'Team', field: 'team', width: 185, cellRenderer: TeamCell, comparator: nullsLast, tooltipField: 'team',
+      headerTooltip: 'His 2027 club if signed, otherwise the last professional team he played for',
+      exportValue: (r) => r.team ?? '' },
+    { headerName: 'College', colId: 'college', width: 230, valueGetter: (p) => collegeText(p.data), comparator: nullsLast,
+      tooltipValueGetter: (p) => collegeText(p.data), headerTooltip: 'College and graduation year',
+      exportValue: collegeText },
+    { headerName: 'Pos', field: 'primary_position', width: 62, comparator: nullsLast },
+    { headerName: 'B', field: 'bats', width: 46, headerTooltip: 'Bats' },
+    { headerName: 'T', field: 'throws', width: 46, headerTooltip: 'Throws' },
   ]
+  if (role) {
+    cols.push({ headerName: 'Role', field: 'pitcher_role', width: 62, comparator: nullsLast,
+      headerTooltip: "Starter when 50% or more of his last three seasons' appearances were starts, weighted toward the most recent" })
+  }
+  return cols
 }
 
-export function statColumns(stats, { seasonField = 'season', teamsField = 'teams', showSeason = true } = {}) {
+// showTeam adds the club for each season (used in the pop up, where every row is a different season).
+export function statColumns(stats, { seasonField = 'season', teamsField = 'teams', showSeason = true, showTeam = false } = {}) {
   const cols = []
   if (showSeason) {
     cols.push({ headerName: 'Yr', field: seasonField, width: 64, comparator: nullsLast, headerTooltip: 'Season these stats are from' })
+  }
+  if (showTeam) {
     cols.push({ headerName: 'Team', field: teamsField, width: 170, comparator: nullsLast, tooltipField: teamsField })
   }
   for (const s of stats) {

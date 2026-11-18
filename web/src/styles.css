@@ -115,6 +115,7 @@ button, input, select { font: inherit; color: inherit; }
 .num-h .ag-header-cell-label { justify-content: flex-end; }
 .pit-h { background: #E3EAE4; }
 .is-small { color: #9AA59D; }
+.none { color: #9AA59D; }
 .cell-marker { display: flex; align-items: center; justify-content: center; padding: 0 !important; }
 
 .namecell { display: inline-flex; align-items: center; gap: var(--s2); min-width: 0; }

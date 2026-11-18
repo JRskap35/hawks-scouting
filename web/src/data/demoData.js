@@ -166,6 +166,10 @@ export function buildDemo(seed = 2027) {
         pitching[p.id][0] = pitchingRates({ ...pitching[p.id][0], outs: Math.max(pitching[p.id][0].outs, 75) })
       }
     }
+    // Team column: 2027 club if signed, otherwise the last professional team, otherwise none.
+    const lastPro = [...(batting[p.id] ?? []), ...(pitching[p.id] ?? [])]
+      .filter((x) => x.leagues === 'Pioneer League').sort((a, b) => b.season - a.season)[0]
+    p.team = p.status_team ?? lastPro?.teams ?? null
     players.push(p)
   }
 

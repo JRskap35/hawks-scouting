@@ -144,18 +144,13 @@ export default function App() {
   }, [lists, page, group, status, markerFilter, pageFilters, scoutedRows])
 
   const columnDefs = useMemo(() => {
-    const lead = leadColumns(narrow)
-    if (page === 'hitters') return [...lead, { headerName: 'B', field: 'bats', width: 50 }, ...statColumns(stats)]
-    if (page === 'pitchers') {
-      return [...lead,
-        { headerName: 'Role', field: 'pitcher_role', width: 66, comparator: nullsLast, headerTooltip: 'Starter when 50% or more of his last three seasons\' appearances were starts, weighted toward the most recent' },
-        { headerName: 'T', field: 'throws', width: 46 }, ...statColumns(stats)]
-    }
+    if (page === 'hitters') return [...leadColumns(narrow), ...statColumns(stats)]
+    if (page === 'pitchers') return [...leadColumns(narrow, { role: true }), ...statColumns(stats)]
     if (page === 'twoWay') {
-      return [...lead, { headerName: 'Team', field: 'teams', width: 160 },
+      return [...leadColumns(narrow),
         ...statColumns(stats, { showSeason: false }).map((c) => (['ip', 'era', 'whip', 'fip', 'p_so', 'k9'].includes(c.field) ? { ...c, headerClass: `${c.headerClass} pit-h` } : c))]
     }
-    return [...lead,
+    return [...leadColumns(narrow),
       { headerName: 'Line', field: 'line', width: 330, sortable: false, tooltipField: 'line' },
       { headerName: 'Marked as', field: 'marker', width: 150, valueFormatter: (p) => markerLabel(p.value), exportValue: (r) => markerLabel(r.marker) },
       { headerName: 'By', field: 'marker_set_by', width: 120, comparator: nullsLast },
