@@ -1,0 +1,10 @@
+.env
+.cache/
+__pycache__/
+.pytest_cache/
+.venv/
+web/node_modules/
+web/dist/
+web/dist-preview/
+web/.env
+web/.env.local
