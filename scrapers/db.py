@@ -33,11 +33,18 @@ def connect(url: Optional[str] = None) -> psycopg.Connection:
     return psycopg.connect(url, row_factory=dict_row)
 
 
-def init_schema(conn: psycopg.Connection):
-    for name in SCHEMA_FILES:
+def init_schema(conn: psycopg.Connection) -> str:
+    """
+    First run: create everything. Later runs: the tables already hold data, so only the
+    views in web.sql are rebuilt (they are safe to drop and recreate). Returns what it did.
+    """
+    exists = conn.execute("SELECT to_regclass('public.players') IS NOT NULL AS e").fetchone()["e"]
+    files = SCHEMA_FILES[1:] if exists else SCHEMA_FILES
+    for name in files:
         with open(os.path.join(DB_DIR, name)) as f:
             conn.execute(f.read())
     conn.commit()
+    return "updated views" if exists else "created"
 
 
 # ---------------------------------------------------------------------------

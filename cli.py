@@ -1,7 +1,8 @@
 """
 Command line entry point.
 
-    python cli.py init-db                     create every table and view
+    python cli.py init-db                     create every table and view (rerun: rebuilds views only)
+    python cli.py check-site                  read one page of each kind from the league site
     python cli.py pioneer --season 2026       first load: 2026 stats and bios, 2026 and 2027 reports, 2027 statuses
     python cli.py transactions                upcoming season's report and status rebuild only
     python cli.py rebuild-status              recompute every player's signing status
@@ -32,8 +33,13 @@ def current_season() -> int:
 
 def cmd_init_db(_args):
     with db.connect() as conn:
-        db.init_schema(conn)
-    print("Schema created.")
+        did = db.init_schema(conn)
+    print("Tables and views created." if did == "created" else "Tables already exist. Views rebuilt; no data touched.")
+
+
+def cmd_check_site(args):
+    from scrapers.check import check_site, format_checks
+    print(format_checks(check_site(PoliteSession(), season=args.season)))
 
 
 def cmd_pioneer(args):
@@ -118,6 +124,10 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("init-db").set_defaults(fn=cmd_init_db)
+
+    s = sub.add_parser("check-site", help="read one page of each kind from the league site, no database needed")
+    s.add_argument("--season", type=int)
+    s.set_defaults(fn=cmd_check_site)
 
     s = sub.add_parser("pioneer")
     s.add_argument("--season", type=int, default=current_season())

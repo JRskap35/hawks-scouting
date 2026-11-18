@@ -452,3 +452,24 @@ def test_report_season_routing():
     with pytest.raises(RuntimeError):
         pioneer.fetch_report(rec, pioneer.PIONEER, 2027, today=date(2026, 11, 18))
     assert rec.urls[1:] == list(pioneer.PIONEER.transactions_current)
+
+
+def test_check_site_reads_every_page_kind():
+    from scrapers.check import check_site, format_checks
+    checks = check_site(FakeHttp(), pioneer.PIONEER, 2026)
+    status = {c.name: c.status for c in checks}
+    assert status["Hitting stats"] == "PASS"
+    assert status["Pitching stats"] == "PASS"
+    assert status["Team roster"] == "PASS"
+    assert status["Game log"] == "PASS"           # first pitcher listed (Starter) has a game log page
+    assert status["Transactions, 2027 report"] == "PASS"
+    assert set(status.values()) == {"PASS"}
+    assert "Ready for the first load" in format_checks(checks)
+
+
+def test_init_schema_twice_keeps_data(conn):
+    src = db.get_or_create_source(conn, "test", "x")
+    db.upsert_player(conn, src, "keep", "x", "Keep", "Me")
+    conn.commit()
+    assert db.init_schema(conn) == "updated views"
+    assert conn.execute("SELECT count(*) AS n FROM players").fetchone()["n"] == 1

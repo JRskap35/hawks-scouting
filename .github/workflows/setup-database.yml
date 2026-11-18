@@ -1,0 +1,62 @@
+# Run setup tasks from the Actions tab, no local install needed.
+#   Actions > Set up database > Run workflow > pick a task.
+# The output also appears on the run's summary page.
+
+name: Set up database
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What to run
+        type: choice
+        options:
+          - Check the league site
+          - Create tables
+          - First load
+        default: Check the league site
+      season:
+        description: Stats season (leave blank for the latest)
+        required: false
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90           # the first load fetches one game log page per player at 3 seconds each
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SCRAPER_CONTACT: ${{ secrets.SCRAPER_CONTACT }}
+      SEASON: ${{ inputs.season }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Check the database secret
+        if: inputs.task != 'Check the league site'
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is not set. Add it under Settings > Secrets and variables > Actions > Repository secrets."
+            exit 1
+          fi
+
+      - name: ${{ inputs.task }}
+        run: |
+          case "${{ inputs.task }}" in
+            "Check the league site") cmd="python cli.py check-site ${SEASON:+--season $SEASON}" ;;
+            "Create tables")         cmd="python cli.py init-db" ;;
+            "First load")            cmd="python cli.py pioneer ${SEASON:+--season $SEASON}" ;;
+          esac
+          echo "Running: $cmd"
+          set -o pipefail
+          $cmd 2>&1 | tee output.txt
+          {
+            echo "### ${{ inputs.task }}"
+            echo '```'
+            tail -c 60000 output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
