@@ -5,7 +5,7 @@
 #   Settings > Pages > Source: GitHub Actions
 #   Settings > Secrets and variables > Actions > Variables:
 #     SUPABASE_URL        https://xxxx.supabase.co
-#     SUPABASE_ANON_KEY   the anon public key (safe to publish, row level security protects the data)
+#     SUPABASE_PUBLISHABLE_KEY   the publishable key, sb_publishable_... (safe to publish, row level security protects the data)
 # Without those two variables the site deploys in demo mode with made up players.
 
 name: Deploy site
@@ -42,7 +42,7 @@ jobs:
       - run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist

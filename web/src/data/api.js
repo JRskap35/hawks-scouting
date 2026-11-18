@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { buildDemo } from './demoData.js'
 
 const URL = import.meta.env.VITE_SUPABASE_URL
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 export const IS_DEMO = import.meta.env.VITE_DEMO === 'true' || !URL || !KEY
 
 // ---------------------------------------------------------------------------
