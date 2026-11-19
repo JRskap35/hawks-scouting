@@ -135,7 +135,7 @@ def main():
     print("\nJSON:", json.dumps(rows))
 
 
-if __name__ == "__main__" and not ({"--deep", "--coverage", "--sites"} & set(__import__("sys").argv)):
+if __name__ == "__main__" and not ({"--deep", "--coverage", "--sites", "--bref"} & set(__import__("sys").argv)):
     main()
 
 
@@ -389,3 +389,56 @@ def sites():
 
 if __name__ == "__main__" and "--sites" in __import__("sys").argv:
     sites()
+
+
+def bref():
+    """Baseball Reference register: 2026 Pioneer League season -> one team page -> one player page."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+    base = "https://www.baseball-reference.com"
+
+    def soup_of(url):
+        time.sleep(3.5)                              # their robots.txt asks for 3 seconds between requests
+        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        return r.status_code, BeautifulSoup(r.text.replace("<!--", "").replace("-->", ""), "lxml")
+
+    code, s = soup_of(f"{base}/register/league.cgi?code=PION&class=Ind")
+    seasons = {a.get_text(strip=True): urljoin(base, a["href"]) for a in s.find_all("a", href=True) if "league.cgi?id=" in a["href"]}
+    print(f"[{code}] league page: seasons listed {sorted(k for k in seasons if k.isdigit())[-5:]}")
+    url26 = seasons.get("2026")
+    if not url26:
+        print("[--] no 2026 season link")
+        return
+    code, s = soup_of(url26)
+    teams = list(dict.fromkeys(urljoin(base, a["href"]) for a in s.find_all("a", href=True) if "team.cgi?id=" in a["href"]))
+    print(f"[{code}] 2026 season page {url26}: {len(teams)} team links")
+    if not teams:
+        return
+    code, s = soup_of(teams[0])
+    title = s.title.get_text(strip=True) if s.title else ""
+    print(f"[{code}] team page {teams[0]}: '{title}'")
+    player_link = None
+    for t in s.find_all("table"):
+        tid = t.get("id")
+        rows = t.select("tbody tr")
+        heads = [h.get_text(strip=True) for h in t.select("thead tr th")][:32]
+        print(f"     table {tid}: {len(rows)} rows, columns {heads}")
+        if not player_link:
+            a = t.find("a", href=lambda h: h and "player.fcgi" in h)
+            if a:
+                player_link = urljoin(base, a["href"])
+    if player_link:
+        code, s = soup_of(player_link)
+        meta = s.find(id="meta")
+        bio = " ".join(meta.get_text(" ", strip=True).split())[:500] if meta else ""
+        print(f"[{code}] player page {player_link}")
+        print(f"     bio: {bio}")
+        for t in s.find_all("table"):
+            rows = t.select("tbody tr")
+            lv = sorted({td.get_text(strip=True) for td in t.select("tbody td[data-stat=level]")})
+            lg = sorted({td.get_text(strip=True) for td in t.select("tbody td[data-stat=lg_ID]")})
+            print(f"     table {t.get('id')}: {len(rows)} rows; levels {lv[:10]}; leagues {lg[:10]}")
+
+
+if __name__ == "__main__" and "--bref" in __import__("sys").argv:
+    bref()
