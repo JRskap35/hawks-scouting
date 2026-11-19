@@ -135,7 +135,7 @@ def main():
     print("\nJSON:", json.dumps(rows))
 
 
-if __name__ == "__main__" and not ({"--deep", "--coverage"} & set(__import__("sys").argv)):
+if __name__ == "__main__" and not ({"--deep", "--coverage", "--sites"} & set(__import__("sys").argv)):
     main()
 
 
@@ -310,3 +310,82 @@ def coverage():
 
 if __name__ == "__main__" and "--coverage" in __import__("sys").argv:
     coverage()
+
+
+def sites():
+    """Find each league site's stats pages from its home page links, and check Baseball Reference's register."""
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+
+    def fetch(url):
+        rp = robots_for(url)
+        if hasattr(rp, "can_fetch") and not rp.can_fetch(USER_AGENT, url):
+            return None, "robots.txt disallows"
+        time.sleep(3)
+        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        return r, None
+
+    for name, home in (("Frontier League", "https://www.frontierleague.com/"),
+                       ("American Association", "https://aabaseball.com/"),
+                       ("Atlantic League", "https://www.atlanticleague.com/")):
+        r, why = fetch(home)
+        if r is None or r.status_code != 200:
+            print(f"[--] {name}: home {why or r.status_code}")
+            continue
+        soup = BeautifulSoup(r.text, "lxml")
+        links = []
+        for a in soup.find_all("a", href=True):
+            text = a.get_text(" ", strip=True).lower()
+            if "stat" in text or "stat" in a["href"].lower():
+                links.append(urljoin(home, a["href"]))
+        links = list(dict.fromkeys(links))[:6]
+        print(f"[ok] {name}: stats links on home page: {links}")
+        for link in links[:2]:
+            try:
+                r2, why2 = fetch(link)
+                if r2 is None:
+                    print(f"     {link}: {why2}")
+                    continue
+                s2 = BeautifulSoup(r2.text, "lxml")
+                tables = s2.find_all("table")
+                heads = [h.get_text(" ", strip=True) for h in (tables[0].find_all("th")[:14] if tables else [])]
+                frames = [f.get("src") for f in s2.find_all("iframe") if f.get("src")][:3]
+                print(f"     {link}: HTTP {r2.status_code}, final {r2.url}, {len(tables)} tables, headers {heads}, iframes {frames}")
+            except Exception as e:
+                print(f"     {link}: {type(e).__name__}")
+
+    for url in ("https://www.baseball-reference.com/register/league.cgi?code=PION&class=Ind",
+                "https://www.baseball-reference.com/register/league.cgi?code=PION&class=Smr"):
+        try:
+            r, why = fetch(url)
+            if r is None:
+                print(f"[--] Baseball Reference {url}: {why}")
+                continue
+            soup = BeautifulSoup(r.text, "lxml")
+            title = soup.title.get_text(strip=True) if soup.title else ""
+            season_links = [urljoin(url, a["href"]) for a in soup.find_all("a", href=True)
+                            if "league.cgi?id=" in a["href"] and a.get_text(strip=True) in ("2026", "2025")]
+            print(f"[{'ok' if r.status_code == 200 else '--'}] Baseball Reference {url}: HTTP {r.status_code}, '{title}', season links {season_links[:2]}")
+            if season_links:
+                r2, _ = fetch(season_links[0])
+                s2 = BeautifulSoup(r2.text, "lxml")
+                # Sports Reference hides some tables inside HTML comments
+                html2 = r2.text.replace("<!--", "").replace("-->", "")
+                s2 = BeautifulSoup(html2, "lxml")
+                ids = [t.get("id") for t in s2.find_all("table")]
+                print(f"     season page {season_links[0]}: HTTP {r2.status_code}, tables {ids[:12]}")
+                bat = next((urljoin(url, a["href"]) for a in s2.find_all("a", href=True) if "bat" in a["href"] and "league" in a["href"]), None)
+                if bat:
+                    r3, _ = fetch(bat)
+                    s3 = BeautifulSoup(r3.text.replace("<!--", "").replace("-->", ""), "lxml")
+                    t = s3.find("table")
+                    rows = len(t.find_all("tr")) if t else 0
+                    heads = [h.get_text(strip=True) for h in t.find("thead").find_all("th")][:30] if t and t.find("thead") else []
+                    print(f"     batting page {bat}: HTTP {r3.status_code}, {rows} rows, columns {heads}")
+                break
+        except Exception as e:
+            print(f"[--] Baseball Reference {url}: {type(e).__name__}: {str(e)[:120]}")
+
+
+if __name__ == "__main__" and "--sites" in __import__("sys").argv:
+    sites()
