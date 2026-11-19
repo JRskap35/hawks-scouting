@@ -249,9 +249,11 @@ export default function App() {
         {!loadError && !lists && <div className="empty">Loading players</div>}
         {lists && rows.length === 0 && (
           <div className="empty">
-            {page === 'scouted' && scoutedRows.length === 0
-              ? <p>No one is marked yet. Use the star beside any player to mark him Looking to Sign, Potential, or Already Reviewed.</p>
-              : <p>No players match these filters. Remove a filter or widen a range.</p>}
+            {allPlayers.length === 0
+              ? <p>No players are loaded yet. They appear after the first data load finishes.</p>
+              : page === 'scouted' && scoutedRows.length === 0
+                ? <p>No one is marked yet. Use the star beside any player to mark him Looking to Sign, Potential, or Already Reviewed.</p>
+                : <p>No players match these filters. Remove a filter or widen a range.</p>}
           </div>
         )}
         {lists && rows.length > 0 && (
