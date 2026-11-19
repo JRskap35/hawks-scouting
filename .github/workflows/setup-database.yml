@@ -52,6 +52,10 @@ jobs:
             echo "::error::DATABASE_URL still contains [YOUR-PASSWORD]. Replace it, brackets included, with your database password."
             exit 1
           fi
+          if echo "$DATABASE_URL" | grep -Eq ':\[|\]@'; then
+            echo "::error::DATABASE_URL has square brackets around the password. Remove the [ and ] so it reads ...:yourpassword@..."
+            exit 1
+          fi
 
       - name: ${{ inputs.task }}
         run: |
