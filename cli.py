@@ -44,6 +44,7 @@ def cmd_init_db(_args):
 def cmd_bref(args):
     from scrapers import bref
     with db.connect() as conn:
+        db.init_schema(conn)          # applies any new columns and views first; existing data is untouched
         source_id = db.get_or_create_source(conn, bref.SOURCE_NAME, bref.BASE, priority=1)
         with db.scrape_run(conn, source_id) as tally:
             result = bref.load_league_season(conn, PoliteSession(), bref.PIONEER, args.season, tally,
@@ -79,6 +80,7 @@ def load_transaction_files(conn, paths) -> dict:
 def cmd_transactions_file(args):
     paths = args.paths or sorted(glob.glob("data/transactions/20*.txt"))
     with db.connect() as conn:
+        db.init_schema(conn)          # applies any new columns and views first; existing data is untouched
         result = load_transaction_files(conn, paths)
         result["status_rows"] = db.rebuild_status(conn, pioneer.transaction_season())
         conn.commit()
