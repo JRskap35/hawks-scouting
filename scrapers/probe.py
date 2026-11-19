@@ -135,7 +135,7 @@ def main():
     print("\nJSON:", json.dumps(rows))
 
 
-if __name__ == "__main__" and "--deep" not in __import__("sys").argv:
+if __name__ == "__main__" and not ({"--deep", "--coverage"} & set(__import__("sys").argv)):
     main()
 
 
@@ -276,3 +276,37 @@ def deep():
 
 if __name__ == "__main__" and len(__import__("sys").argv) > 1 and __import__("sys").argv[1] == "--deep":
     deep()
+
+
+def coverage():
+    """Which leagues in the API actually carry players and stats, not just team names."""
+    for sport_id, label in ((23, "Independent"), (22, "College")):
+        teams = _get(f"/v1/teams?sportId={sport_id}&season=2026")["teams"]
+        leagues: dict = {}
+        for t in teams:
+            lg = t.get("league", {})
+            leagues.setdefault((lg.get("id"), lg.get("name", "?")), []).append(t)
+        print(f"== {label}: {len(teams)} teams, {len(leagues)} leagues")
+        for (lid, lname), ts in list(leagues.items())[:8]:
+            t = ts[0]
+            try:
+                full = len(_get(f"/v1/teams/{t['id']}/roster?season=2026&rosterType=fullSeason").get("roster", []))
+                active = len(_get(f"/v1/teams/{t['id']}/roster?season=2026").get("roster", []))
+                games = sum(len(d["games"]) for d in _get(f"/v1/schedule?sportId={sport_id}&teamId={t['id']}&season=2026").get("dates", []))
+                stats = _get(f"/v1/stats?stats=season&group=hitting&sportId={sport_id}&season=2026&leagueIds={lid}&playerPool=ALL&limit=2000") if lid else {}
+                n = len(stats["stats"][0]["splits"]) if stats.get("stats") else 0
+                print(f"   {lname} ({len(ts)} teams): {t['name']} roster {full}/{active}, games {games}; league hitting rows {n}")
+            except Exception as e:
+                print(f"   {lname}: {type(e).__name__} {str(e)[:120]}")
+    # Was the Pioneer League ever covered? Try 2025 and 2024.
+    for yr in (2025, 2024):
+        try:
+            s = _get(f"/v1/stats?stats=season&group=hitting&sportId=23&season={yr}&leagueIds=128&playerPool=ALL&limit=2000")
+            n = len(s["stats"][0]["splits"]) if s.get("stats") else 0
+            print(f"Pioneer League hitting rows {yr}: {n}")
+        except Exception as e:
+            print(f"Pioneer League {yr}: {type(e).__name__}")
+
+
+if __name__ == "__main__" and "--coverage" in __import__("sys").argv:
+    coverage()
