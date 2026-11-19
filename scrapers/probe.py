@@ -135,5 +135,144 @@ def main():
     print("\nJSON:", json.dumps(rows))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and "--deep" not in __import__("sys").argv:
     main()
+
+
+# ---------------------------------------------------------------------------
+# Deep probe of the MLB Stats API for the independent leagues (sportId 23)
+# ---------------------------------------------------------------------------
+
+API = "https://statsapi.mlb.com/api"
+
+
+def _get(path: str):
+    time.sleep(1.0)
+    r = requests.get(f"{API}{path}", headers={"User-Agent": USER_AGENT}, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def deep():
+    def show(label, fn):
+        try:
+            print(f"[ok] {label}: {fn()}")
+        except Exception as e:
+            print(f"[--] {label}: {type(e).__name__}: {str(e)[:160]}")
+
+    teams = _get("/v1/teams?sportId=23&season=2026")["teams"]
+    pion = [t for t in teams if t.get("league", {}).get("name") == "Pioneer League"]
+    print(f"Pioneer League teams in the API: {len(pion)}: {', '.join(t['name'] for t in pion)}")
+    boise = next((t for t in pion if "Boise" in t["name"]), pion[0] if pion else None)
+    league_id = boise["league"]["id"] if boise else None
+    copyright_note = _get("/v1/sports").get("copyright", "")
+    print(f"API copyright notice: {copyright_note}")
+    if not boise:
+        return
+    print(f"Using {boise['name']} (team {boise['id']}, league {league_id})")
+
+    roster = _get(f"/v1/teams/{boise['id']}/roster?season=2026&rosterType=fullSeason").get("roster", [])
+    show("Full season roster", lambda: f"{len(roster)} players, e.g. " + ", ".join(
+        f"{p['person']['fullName']} ({p['position']['abbreviation']})" for p in roster[:4]))
+    hitter = next((p for p in roster if p["position"]["type"] != "Pitcher"), None)
+    pitcher = next((p for p in roster if p["position"]["type"] == "Pitcher"), None)
+
+    def bio():
+        pid = (hitter or pitcher)["person"]["id"]
+        p = _get(f"/v1/people/{pid}")["people"][0]
+        keys = ["fullName", "birthDate", "currentAge", "height", "weight", "batSide", "pitchHand", "birthCity",
+                "birthStateProvince", "draftYear", "mlbDebutDate", "primaryPosition"]
+        return {k: (p[k]["code"] if isinstance(p.get(k), dict) and "code" in p[k] else p.get(k)) for k in keys if k in p}
+    show("Player bio fields", bio)
+
+    def season(pid, group):
+        d = _get(f"/v1/people/{pid}/stats?stats=season&group={group}&sportId=23&season=2026")
+        splits = d["stats"][0]["splits"] if d.get("stats") else []
+        if not splits:
+            return "no splits"
+        s = splits[0]["stat"]
+        return f"{len(s)} fields: " + ", ".join(list(s.keys())[:40])
+    if hitter:
+        show(f"Season hitting ({hitter['person']['fullName']})", lambda: season(hitter["person"]["id"], "hitting"))
+        show("Season fielding", lambda: season(hitter["person"]["id"], "fielding"))
+    if pitcher:
+        show(f"Season pitching ({pitcher['person']['fullName']})", lambda: season(pitcher["person"]["id"], "pitching"))
+
+    def gamelog(pid, group):
+        d = _get(f"/v1/people/{pid}/stats?stats=gameLog&group={group}&sportId=23&season=2026")
+        splits = d["stats"][0]["splits"] if d.get("stats") else []
+        if not splits:
+            return "no games"
+        g = splits[0]
+        return f"{len(splits)} games; first: {g.get('date')} vs {g.get('opponent', {}).get('name')} {dict(list(g['stat'].items())[:10])}"
+    if pitcher:
+        show("Pitching game log", lambda: gamelog(pitcher["person"]["id"], "pitching"))
+    if hitter:
+        show("Hitting game log", lambda: gamelog(hitter["person"]["id"], "hitting"))
+
+    def splits():
+        pid = hitter["person"]["id"]
+        d = _get(f"/v1/people/{pid}/stats?stats=statSplits&group=hitting&sportId=23&season=2026&sitCodes=vl,vr,h,a")
+        sp = d["stats"][0]["splits"] if d.get("stats") else []
+        return f"{len(sp)} splits: " + ", ".join(f"{s['split']['description']} AVG {s['stat'].get('avg')}" for s in sp)
+    if hitter:
+        show("Splits vs LHP / RHP, home / away", splits)
+
+    def advanced():
+        pid = hitter["person"]["id"]
+        d = _get(f"/v1/people/{pid}/stats?stats=seasonAdvanced&group=hitting&sportId=23&season=2026")
+        sp = d["stats"][0]["splits"] if d.get("stats") else []
+        return ", ".join(list(sp[0]["stat"].keys())[:30]) if sp else "none"
+    if hitter:
+        show("Advanced hitting fields", advanced)
+
+    def league_wide(group):
+        d = _get(f"/v1/stats?stats=season&group={group}&sportId=23&season=2026&leagueIds={league_id}&playerPool=ALL&limit=2000")
+        sp = d["stats"][0]["splits"] if d.get("stats") else []
+        return f"{len(sp)} players in one request"
+    show("Whole league hitting in one call", lambda: league_wide("hitting"))
+    show("Whole league pitching in one call", lambda: league_wide("pitching"))
+
+    def txns():
+        d = _get("/v1/transactions?sportId=23&startDate=2025-10-01&endDate=2026-11-18")
+        t = d.get("transactions", [])
+        pl = [x for x in t if "Pioneer" in json.dumps(x.get("toTeam", {})) + json.dumps(x.get("fromTeam", {}))
+              or any(b["id"] == x.get("toTeam", {}).get("id") or b["id"] == x.get("fromTeam", {}).get("id") for b in pion)]
+        kinds = {}
+        for x in pl:
+            kinds[x.get("typeDesc", "?")] = kinds.get(x.get("typeDesc", "?"), 0) + 1
+        sample = pl[0]["description"] if pl else ""
+        return f"{len(t)} indy moves, {len(pl)} Pioneer League; types {kinds}; e.g. {sample}"
+    show("Independent league transactions", txns)
+
+    def pitch_tracking():
+        sched = _get(f"/v1/schedule?sportId=23&teamId={boise['id']}&startDate=2026-07-01&endDate=2026-07-10")
+        pks = [g["gamePk"] for d in sched.get("dates", []) for g in d["games"]]
+        if not pks:
+            return "no games found in that week"
+        feed = _get(f"/v1.1/game/{pks[0]}/feed/live")
+        plays = feed.get("liveData", {}).get("plays", {}).get("allPlays", [])
+        pitches = [e for p in plays for e in p.get("playEvents", []) if e.get("isPitch")]
+        velo = [e for e in pitches if e.get("pitchData", {}).get("startSpeed")]
+        spin = [e for e in pitches if e.get("pitchData", {}).get("breaks", {}).get("spinRate")]
+        ev = [e for e in pitches if e.get("hitData", {}).get("launchSpeed")]
+        ex = velo[0]["pitchData"] if velo else {}
+        return (f"game {pks[0]}: {len(pitches)} pitches, {len(velo)} with velocity, {len(spin)} with spin, "
+                f"{len(ev)} with exit velocity; sample speed {ex.get('startSpeed')} type "
+                f"{velo[0].get('details', {}).get('type', {}).get('description') if velo else None}")
+    show("Pitch tracking in game feeds", pitch_tracking)
+
+    def college():
+        d = _get("/v1/teams?sportId=22&season=2026")
+        return f"{len(d.get('teams', []))} college teams"
+    show("College coverage (sportId 22)", college)
+
+    def affiliated_releases():
+        d = _get("/v1/transactions?sportId=11&startDate=2026-09-01&endDate=2026-11-18")
+        t = [x for x in d.get("transactions", []) if x.get("typeCode") in ("REL", "DFA") or "free agency" in x.get("typeDesc", "").lower()]
+        return f"{len(t)} Triple-A releases or free agency moves since Sep 1; e.g. {t[0]['description'] if t else ''}"
+    show("Affiliated releases (Triple-A sample)", affiliated_releases)
+
+
+if __name__ == "__main__" and len(__import__("sys").argv) > 1 and __import__("sys").argv[1] == "--deep":
+    deep()
