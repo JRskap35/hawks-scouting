@@ -216,11 +216,28 @@ def fetch_report(http: PoliteSession, cfg: LeagueConfig, season: int,
 def load_transactions(conn, http: PoliteSession, cfg: LeagueConfig, season: int, source_id: int,
                       tally: dict) -> dict:
     url, html = fetch_report(http, cfg, season)
+    return store_transactions(conn, report_lines(html), season, source_id, url, tally)
+
+
+def load_transactions_text(conn, text: str, season: int, tally: dict, label: str) -> dict:
+    """
+    Transactions pasted from the league page into a text file (data/transactions/2027.txt).
+    Lines starting with # are notes and are ignored.
+    """
+    source_id = db.get_or_create_source(conn, "Pioneer League transactions (pasted)", PIONEER.site, priority=5)
+    lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    return store_transactions(conn, lines, season, source_id, label, tally)
+
+
+def store_transactions(conn, lines: list[str], season: int, source_id: int, url: str, tally: dict) -> dict:
     known = [r["name"] for r in conn.execute("SELECT name FROM teams WHERE org = 'independent'").fetchall()]
-    parsed = parse_report(report_lines(html), season, known_teams=known)
+    parsed = parse_report(lines, season, known_teams=known)
     idx = db.name_index(conn)
 
-    summary = {"url": url, "parsed": len(parsed), "inserted": 0, "unmatched": [], "unclassified": []}
+    summary = {"source": url, "parsed": len(parsed), "inserted": 0, "matched": 0, "unmatched": [], "unclassified": []}
+    if parsed:
+        summary["newest"] = str(max(t.txn_date for t in parsed))
+        summary["oldest"] = str(min(t.txn_date for t in parsed))
     for t in parsed:
         if not t.player_name:
             summary["unclassified"].append(t.raw_text)
@@ -238,6 +255,8 @@ def load_transactions(conn, http: PoliteSession, cfg: LeagueConfig, season: int,
         pid = db.match_player(idx, t.player_name, team_hint=[t.team, t.counterparty or ""])
         if pid is None:
             summary["unmatched"].append(f"{t.txn_date} {t.team}: {t.raw_text}")
+        else:
+            summary["matched"] += 1
 
         if db.insert_transaction(
                 conn, player_id=pid, raw_name=t.player_name, txn_date=t.txn_date, txn=t.txn,

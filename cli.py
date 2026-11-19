@@ -5,6 +5,8 @@ Command line entry point.
     python cli.py check-site                  read one page of each kind from the league site
     python cli.py pioneer --season 2026       first load: 2026 stats and bios, 2026 and 2027 reports, 2027 statuses
     python cli.py transactions                upcoming season's report and status rebuild only
+    python cli.py bref --season 2026          load the Pioneer League from Baseball Reference
+    python cli.py transactions-file           load transactions pasted into data/transactions/*.txt
     python cli.py rebuild-status              recompute every player's signing status
     python cli.py refresh                     what the two week schedule runs
     python cli.py doctor <url>                show what the parser sees on a page (no database needed)
@@ -14,7 +16,9 @@ Command line entry point.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
+import os
 import logging
 import sys
 
@@ -44,8 +48,40 @@ def cmd_bref(args):
         with db.scrape_run(conn, source_id) as tally:
             result = bref.load_league_season(conn, PoliteSession(), bref.PIONEER, args.season, tally,
                                              players=not args.skip_players, force_players=args.force_players)
-            result["status_rows"] = db.rebuild_status(conn, pioneer.transaction_season())
-            result["errors"] = list(tally["errors"])
+            errors = list(tally["errors"])
+        # Pasted transactions are matched again now that the players exist.
+        files = sorted(glob.glob("data/transactions/20*.txt"))
+        if files:
+            result["transactions"] = load_transaction_files(conn, files)
+        result["status_rows"] = db.rebuild_status(conn, pioneer.transaction_season())
+        conn.commit()
+        result["errors"] = errors
+    print(json.dumps(result, indent=2, default=str))
+
+
+def load_transaction_files(conn, paths) -> dict:
+    """Each file is named for its report season: data/transactions/2027.txt holds the 2027 report."""
+    import re as _re
+    out = {}
+    source_id = db.get_or_create_source(conn, "Pioneer League transactions (pasted)", pioneer.PIONEER.site, priority=5)
+    for path in paths:
+        m = _re.search(r"(20\d\d)", os.path.basename(path))
+        if not m:
+            out[path] = "skipped: the file name needs the season, like 2027.txt"
+            continue
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        with db.scrape_run(conn, source_id) as tally:
+            out[path] = pioneer.load_transactions_text(conn, text, int(m.group(1)), tally, label=path)
+    return out
+
+
+def cmd_transactions_file(args):
+    paths = args.paths or sorted(glob.glob("data/transactions/20*.txt"))
+    with db.connect() as conn:
+        result = load_transaction_files(conn, paths)
+        result["status_rows"] = db.rebuild_status(conn, pioneer.transaction_season())
+        conn.commit()
     print(json.dumps(result, indent=2, default=str))
 
 
@@ -147,6 +183,10 @@ def main(argv=None):
     s.add_argument("--skip-players", action="store_true", help="team pages only, no player pages (fast)")
     s.add_argument("--force-players", action="store_true", help="re-read every player page, even recent ones")
     s.set_defaults(fn=cmd_bref)
+
+    s = sub.add_parser("transactions-file", help="load transactions pasted into data/transactions/<season>.txt")
+    s.add_argument("paths", nargs="*", help="default: every data/transactions/20*.txt")
+    s.set_defaults(fn=cmd_transactions_file)
 
     s = sub.add_parser("bref-check", help="read one page of each kind from Baseball Reference, no database needed")
     s.add_argument("--season", type=int, default=current_season())

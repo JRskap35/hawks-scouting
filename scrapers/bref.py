@@ -164,13 +164,14 @@ def parse_birth_date(text: str, csk: Optional[str] = None) -> Optional[date]:
 
 
 def parse_height(text: str) -> Optional[int]:
-    m = re.match(r"^\s*(\d)-(\d{1,2})", text or "")
+    """'6-4', "6' 4\"", '6 4' -> 76."""
+    m = re.match(r"^\s*(\d)\s*(?:-|'|’|\s)\s*(\d{1,2})", text or "")
     return int(m.group(1)) * 12 + int(m.group(2)) if m else None
 
 
 def split_place(text: str) -> tuple[Optional[str], Optional[str]]:
     """'Bell, CA us' -> ('Bell', 'CA')."""
-    t = re.sub(r"\s+[a-z]{2}$", "", (text or "").strip())       # drop the trailing country code
+    t = re.sub(r"(?:,\s*|\s+)(?:us|usa|US|USA)$", "", (text or "").strip())   # drop a trailing US country code
     if "," in t:
         city, state = [p.strip() for p in t.split(",", 1)]
         return city or None, state or None
@@ -318,7 +319,7 @@ def parse_player_page(html: str) -> PlayerPage:
         m = re.search(r"High School:\s*(.+?)(?:\s+(?:Schools?|School|Draft|Full Name|View|More)\b:?|$)", text)
         if m:
             bio["high_school"] = m.group(1).strip()
-        m = re.search(r"Schools?:\s*(.+?)(?:\s+(?:Draft|Full Name|View|More)\b|$)", text)
+        m = re.search(r"(?<!High )Schools?:\s*(.+?)(?:\s+(?:Draft|Full Name|View|More)\b|$)", text)
         if m:
             bio["schools"] = m.group(1).strip()
         page.bio = {k: v for k, v in bio.items() if v not in (None, "")}
@@ -522,6 +523,17 @@ def check(http: PoliteSession, spec: LeagueSpec = PIONEER, season: int = 2026) -
     lines.append(f"  bio {pp.bio}")
     for row in pp.career[:12]:
         lines.append(f"  {row.group} {row.season} {row.level:<5} {row.league:<6} {row.team_name:<28} {row.position or '':<4} {dict(list(row.stats.items())[:8])}")
+    ps = soup_of(http.get_text(sample.url))
+    for t in ps.find_all("table"):
+        heads = headers_of(t)
+        first = next(body_rows(t), None)
+        cells = [c.get_text(" ", strip=True) for c in first[1]] if first else []
+        lines.append(f"  table {t.get('id')}: headers {heads}")
+        lines.append(f"      first row {cells[:26]}")
+    hp = soup_of(http.get_text(url)).find(id=lambda i: i and "roster" in i.lower())
+    if hp:
+        r0 = next(body_rows(hp), None)
+        lines.append(f"  roster headers {headers_of(hp)} first row {[c.get_text(' ', strip=True) for c in r0[1]] if r0 else []}")
     groups = {g: sum(1 for r in pp.career if r.group == g) for g in "hpf"}
     ok = page.name and page.batting and page.pitching and page.roster and pp.career
     lines.append(f"Career rows: {groups}")
