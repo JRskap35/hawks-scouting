@@ -43,6 +43,15 @@ jobs:
             echo "::error::DATABASE_URL is not set. Add it under Settings > Secrets and variables > Actions > Repository secrets."
             exit 1
           fi
+          # The direct connection (db.<ref>.supabase.co) is IPv6 only, and GitHub's servers cannot reach it.
+          if echo "$DATABASE_URL" | grep -Eq '@db\.[a-z0-9]+\.supabase\.co'; then
+            echo "::error::DATABASE_URL is the Direct connection string. In Supabase click Connect, choose Session pooler, and save that string instead (its host ends in pooler.supabase.com)."
+            exit 1
+          fi
+          if echo "$DATABASE_URL" | grep -q 'YOUR-PASSWORD'; then
+            echo "::error::DATABASE_URL still contains [YOUR-PASSWORD]. Replace it, brackets included, with your database password."
+            exit 1
+          fi
 
       - name: ${{ inputs.task }}
         run: |
