@@ -15,3 +15,7 @@ ALTER TABLE players ADD COLUMN IF NOT EXISTS high_school text;
 -- A league counts as complete when every player in it was loaded. League constants such as the
 -- FIP constant are only calculated for complete leagues, since a handful of players would skew them.
 ALTER TABLE leagues ADD COLUMN IF NOT EXISTS complete boolean NOT NULL DEFAULT false;
+
+-- Staff edits to a player's status are stored as transactions: who made it, and an optional note.
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS entered_by uuid;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS note text;

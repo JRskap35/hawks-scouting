@@ -18,7 +18,7 @@ const RULES = {
   released_affiliated: 'Released by an affiliated club',
 }
 
-export default function PlayerModal({ api, playerId, listRow, onClose, setMarker, startView }) {
+export default function PlayerModal({ api, playerId, listRow, onClose, setMarker, startView, statusEdit }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState('')
   const [view, setView] = useState(startView)
@@ -72,7 +72,7 @@ export default function PlayerModal({ api, playerId, listRow, onClose, setMarker
         <div className="modal-head">
           <div className="modal-title">
             <h2 id="modal-title">{p.full_name ?? 'Loading player'}</h2>
-            {p.id && <StatusBadge player={p} />}
+            {p.id && <StatusBadge player={p} edit={statusEdit} />}
             {p.is_two_way && <span className="tag">Two way</span>}
           </div>
           <div className="modal-head-actions">

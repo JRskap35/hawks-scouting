@@ -76,6 +76,24 @@ function liveApi() {
       return data
     },
 
+    // Staff status edit. Returns the player's new status fields so every list can update.
+    async setStatus(playerId, status, team, note) {
+      const { error } = await sb.rpc('set_player_status', { p_player: playerId, p_status: status, p_team: team, p_note: note })
+      if (error) throw new Error(error.message)
+      const { data, error: e2 } = await sb.from('ui_players')
+        .select('status, status_label, status_team, status_date, unconfirmed, can_sign_now, status_by_staff, status_set_by, status_note, team')
+        .eq('id', playerId).maybeSingle()
+      if (e2) throw new Error(e2.message)
+      return data
+    },
+
+    async loadStatusHistory(playerId) {
+      const { data, error } = await sb.from('ui_player_transactions').select('*').eq('player_id', playerId)
+        .order('txn_date', { ascending: false }).order('pulled_at', { ascending: false }).limit(12)
+      if (error) throw new Error(error.message)
+      return data
+    },
+
     // Returns the saved marker fields so every list can update without a reload.
     async setMarker(playerId, status) {
       if (!status) {
@@ -127,6 +145,22 @@ function demoApi() {
     loadPlayer: async (id) => ({
       player: byId.get(id), batting: d.batting[id] ?? [], pitching: d.pitching[id] ?? [], fielding: d.fielding[id] ?? [],
     }),
+    loadStatusHistory: async (id) => [...(d.history[id] ?? [])].reverse(),
+    setStatus: async (id, status, team, note) => {
+      const p = byId.get(id)
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Boise' })   // yyyy-mm-dd, Boise time
+      const label = status === 'free_agent' ? 'Free Agent' : status === 'signed_independent' ? 'Signed' : 'Unconfirmed'
+      Object.assign(p, {
+        status, status_label: label, status_team: status === 'signed_independent' ? team : null,
+        status_date: today, unconfirmed: status === 'unknown', can_sign_now: status === 'free_agent',
+        status_by_staff: true, status_set_by: 'You', status_note: note,
+        team: status === 'signed_independent' ? team : p.last_pro_team,
+      })
+      ;(d.history[id] ??= []).push({ id: Date.now(), txn_date: today, raw_text: `Staff set status: ${label}${team ? ` with ${team}` : ''}`,
+        by_staff: true, entered_by_name: 'You', note })
+      const { status: s, status_label, status_team, status_date, unconfirmed, can_sign_now, status_by_staff, status_set_by, status_note, team: tm } = p
+      return { status: s, status_label, status_team, status_date, unconfirmed, can_sign_now, status_by_staff, status_set_by, status_note, team: tm }
+    },
     loadGameLog: async (id, season, kind) => (kind === 'pitching' ? d.pitchingGames : d.battingGames)[id]?.[season] ?? [],
     setMarker: async (id, status) => {
       const p = byId.get(id)

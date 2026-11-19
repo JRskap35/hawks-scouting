@@ -13,7 +13,8 @@
 -- Views are dropped and rebuilt so this file can be rerun after any change to them.
 DROP VIEW IF EXISTS ui_two_way, ui_pitchers, ui_hitters, ui_players, ui_fielding_seasons,
                     ui_pitching_seasons, ui_batting_seasons, ui_batting_games, ui_pitching_games,
-                    league_fip_constants, eligible_players, pitcher_role, two_way_status CASCADE;
+                    ui_player_transactions, league_fip_constants, eligible_players, pitcher_role,
+                    two_way_status CASCADE;
 
 
 -- ------------------------------------------------------------
@@ -88,6 +89,7 @@ SELECT p.*,
        s.current_team_id,
        s.status_date,
        s.unconfirmed,
+       s.last_txn_id,
        (s.status = 'free_agent') AS can_sign_now,     -- drives the eligible to sign flag in each row
        array_agg(e.rule ORDER BY e.rule) AS rules,
        pr.role       AS pitcher_role,
@@ -98,7 +100,7 @@ JOIN eligibility_evidence e ON e.player_id = p.id
 LEFT JOIN pitcher_role pr   ON pr.player_id = p.id
 LEFT JOIN two_way_status tw ON tw.player_id = p.id
 WHERE s.status NOT IN ('signed_affiliated', 'returning_college', 'retired')
-GROUP BY p.id, s.status, s.current_team_id, s.status_date, s.unconfirmed, pr.role, tw.is_two_way;
+GROUP BY p.id, s.status, s.current_team_id, s.status_date, s.unconfirmed, s.last_txn_id, pr.role, tw.is_two_way;
 
 
 -- ------------------------------------------------------------
@@ -286,6 +288,9 @@ SELECT e.id, e.first_name, e.last_name, e.full_name,
        e.status_date,
        e.unconfirmed,
        e.can_sign_now,
+       (src.name = 'Staff edit') AS status_by_staff,
+       stf.full_name AS status_set_by,
+       lt.note AS status_note,
        e.rules,
        e.pitcher_role,
        COALESCE(e.is_two_way, false) AS is_two_way,
@@ -297,6 +302,9 @@ LEFT JOIN teams col ON col.id = e.college_team_id
 LEFT JOIN teams ct ON ct.id = e.current_team_id
 LEFT JOIN player_markers m ON m.player_id = e.id
 LEFT JOIN staff st ON st.user_id = m.set_by
+LEFT JOIN transactions lt ON lt.id = e.last_txn_id
+LEFT JOIN sources src ON src.id = lt.source_id
+LEFT JOIN staff stf ON stf.user_id = lt.entered_by
 LEFT JOIN LATERAL (
     SELECT t.name AS team_name, s.season
     FROM (SELECT player_id, season, team_id, COALESCE(g, 0) AS g FROM batting_stats WHERE split = 'total'
@@ -334,3 +342,150 @@ FROM ui_players pl
 LEFT JOIN LATERAL (SELECT * FROM ui_batting_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC, s.is_pro DESC, s.pa DESC LIMIT 1) b ON true
 LEFT JOIN LATERAL (SELECT * FROM ui_pitching_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC, s.is_pro DESC, s.outs DESC LIMIT 1) p ON true
 WHERE pl.is_two_way;
+
+
+-- ------------------------------------------------------------
+-- Status history for the badge editor: league moves and staff edits, newest first in the app
+-- ------------------------------------------------------------
+
+CREATE OR REPLACE VIEW ui_player_transactions WITH (security_invoker = true) AS
+SELECT t.id, t.player_id, t.txn_date, t.txn, t.status_effect, t.raw_text, t.team_name, t.note, t.pulled_at,
+       (s.name = 'Staff edit') AS by_staff,
+       st.full_name AS entered_by_name
+FROM transactions t
+JOIN sources s ON s.id = t.source_id
+LEFT JOIN staff st ON st.user_id = t.entered_by
+WHERE t.player_id IS NOT NULL;
+
+
+-- ------------------------------------------------------------
+-- Signing status
+-- ------------------------------------------------------------
+
+-- The season a move counts toward: October onward belongs to the next season.
+-- Dates follow Boise time, so an edit made in the evening is dated that day, not the next UTC day.
+CREATE OR REPLACE FUNCTION boise_today() RETURNS date LANGUAGE sql STABLE AS $$
+    SELECT (now() AT TIME ZONE 'America/Boise')::date
+$$;
+
+CREATE OR REPLACE FUNCTION current_txn_season() RETURNS integer LANGUAGE sql STABLE AS $$
+    SELECT (EXTRACT(YEAR FROM boise_today()) + CASE WHEN EXTRACT(MONTH FROM boise_today()) >= 10 THEN 1 ELSE 0 END)::int
+$$;
+
+-- Recompute status for the upcoming season, for every player or for one.
+--   * The latest move in that season's report decides (staff edits count as moves dated the day
+--     they were made; two moves on the same day go to the one entered last).
+--   * With no move in that report, a release, an MLB contract sale, or a retirement from earlier
+--     still stands. An earlier signing does not: last season's roster spot says nothing about next.
+--   * No moves at all: unconfirmed.
+CREATE OR REPLACE FUNCTION rebuild_status(p_target integer, p_player integer DEFAULT NULL)
+RETURNS integer LANGUAGE plpgsql AS $$
+DECLARE n integer;
+BEGIN
+    WITH latest_txn AS (
+        SELECT DISTINCT ON (player_id)
+               player_id, id, txn_date, status_effect, to_team_id,
+               EXTRACT(YEAR FROM txn_date)::int
+                 + CASE WHEN EXTRACT(MONTH FROM txn_date) >= 10 THEN 1 ELSE 0 END AS txn_season
+        FROM transactions
+        WHERE player_id IS NOT NULL AND status_effect IS NOT NULL
+          AND (p_player IS NULL OR player_id = p_player)
+        ORDER BY player_id, txn_date DESC, pulled_at DESC, id DESC
+    ),
+    resolved AS (
+        SELECT p.id AS player_id,
+               CASE WHEN lt.txn_season >= p_target THEN true
+                    WHEN lt.status_effect IN ('free_agent', 'signed_affiliated', 'retired') THEN true
+                    ELSE false END AS known,
+               lt.id, lt.txn_date, lt.status_effect, lt.to_team_id
+        FROM players p
+        LEFT JOIN latest_txn lt ON lt.player_id = p.id
+        WHERE p_player IS NULL OR p.id = p_player
+    )
+    INSERT INTO player_status (player_id, status, current_team_id, status_date, for_season,
+                               last_txn_id, unconfirmed, updated_at)
+    SELECT r.player_id,
+           CASE WHEN known THEN r.status_effect ELSE 'unknown'::signing_status END,
+           CASE WHEN known AND r.status_effect IN ('signed_independent', 'signed_affiliated') THEN r.to_team_id END,
+           CASE WHEN known THEN r.txn_date END,
+           p_target,
+           CASE WHEN known THEN r.id END,
+           NOT known OR r.status_effect = 'unknown',
+           now()
+    FROM resolved r
+    ON CONFLICT (player_id) DO UPDATE
+       SET status = EXCLUDED.status,
+           current_team_id = EXCLUDED.current_team_id,
+           status_date = EXCLUDED.status_date,
+           for_season = EXCLUDED.for_season,
+           last_txn_id = EXCLUDED.last_txn_id,
+           unconfirmed = EXCLUDED.unconfirmed,
+           updated_at = now()
+       -- Never overwrite a status another process set from better evidence (college return list).
+       WHERE player_status.status <> 'returning_college';
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RETURN n;
+END $$;
+
+-- Called by the site when a staff member clicks a badge and saves.
+-- Records the change as a transaction (with who and an optional note) and recomputes that
+-- player's status. Only signed in staff can call it through the site.
+CREATE OR REPLACE FUNCTION set_player_status(p_player integer, p_status text,
+                                             p_team text DEFAULT NULL, p_note text DEFAULT NULL)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    claims    jsonb := NULLIF(current_setting('request.jwt.claims', true), '')::jsonb;
+    v_user    uuid;
+    v_name    text;
+    v_source  integer;
+    v_team    integer;
+    v_txn     txn_type;
+    v_effect  signing_status;
+    v_label   text;
+BEGIN
+    -- Through the site, only a signed in user may do this. (Direct database connections, such as the
+    -- scrapers, have no request claims and are trusted.)
+    IF claims IS NOT NULL AND COALESCE(claims ->> 'role', '') <> 'authenticated' THEN
+        RAISE EXCEPTION 'Sign in to change a player''s status';
+    END IF;
+    v_user := NULLIF(claims ->> 'sub', '')::uuid;
+
+    SELECT first_name || ' ' || last_name INTO v_name FROM players WHERE id = p_player;
+    IF v_name IS NULL THEN
+        RAISE EXCEPTION 'No player with id %', p_player;
+    END IF;
+
+    CASE p_status
+        WHEN 'free_agent' THEN v_txn := 'released'; v_effect := 'free_agent'; v_label := 'Free Agent';
+        WHEN 'signed_independent' THEN v_txn := 'signed'; v_effect := 'signed_independent'; v_label := 'Signed';
+        WHEN 'unknown' THEN v_txn := 'other'; v_effect := 'unknown'; v_label := 'Unconfirmed';
+        ELSE RAISE EXCEPTION 'Unknown status %', p_status;
+    END CASE;
+
+    IF p_status = 'signed_independent' THEN
+        IF COALESCE(btrim(p_team), '') = '' THEN
+            RAISE EXCEPTION 'Enter the team he signed with';
+        END IF;
+        SELECT id INTO v_team FROM teams WHERE lower(name) = lower(btrim(p_team)) LIMIT 1;
+        IF v_team IS NULL THEN
+            INSERT INTO teams (name, org) VALUES (btrim(p_team), 'independent') RETURNING id INTO v_team;
+        END IF;
+        v_label := v_label || ' with ' || btrim(p_team);
+    END IF;
+
+    INSERT INTO sources (name, priority) VALUES ('Staff edit', 0)
+    ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id INTO v_source;
+
+    -- clock_timestamp(), not now(): two edits in one transaction must still get different times
+    INSERT INTO transactions (player_id, raw_name, txn_date, txn, status_effect, team_name, to_team_id,
+                              raw_text, source_id, entered_by, note, pulled_at)
+    VALUES (p_player, v_name, boise_today(), v_txn, v_effect, btrim(p_team), v_team,
+            'Staff set status: ' || v_label, v_source, v_user, NULLIF(btrim(p_note), ''), clock_timestamp())
+    ON CONFLICT (raw_name, txn_date, txn, source_id) DO UPDATE
+        SET player_id = EXCLUDED.player_id, status_effect = EXCLUDED.status_effect,
+            team_name = EXCLUDED.team_name, to_team_id = EXCLUDED.to_team_id, raw_text = EXCLUDED.raw_text,
+            entered_by = EXCLUDED.entered_by, note = EXCLUDED.note, pulled_at = clock_timestamp();
+
+    PERFORM rebuild_status(current_txn_season(), p_player);
+END $$;

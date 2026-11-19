@@ -1,6 +1,6 @@
 // Shortlist export: spreadsheet (CSV, opens in Excel or Google Sheets) or PDF for the coaching staff.
 
-const stamp = () => new Date().toISOString().slice(0, 10)
+const stamp = () => new Date().toLocaleDateString('en-CA')   // yyyy-mm-dd in the user's own time zone
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob)

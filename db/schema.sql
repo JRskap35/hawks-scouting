@@ -245,6 +245,8 @@ CREATE TABLE transactions (
     team_name     text,                               -- team header the line sat under
     counterparty  text,                               -- other club named in the line, as printed
     raw_text      text,                               -- original line from the report
+    entered_by    uuid,                               -- staff member, for edits made on the site
+    note          text,                               -- staff note on an edit
     source_id     integer REFERENCES sources(id),
     source_url    text,
     pulled_at     timestamptz NOT NULL DEFAULT now(),

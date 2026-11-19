@@ -8,7 +8,7 @@ Command line entry point.
     python cli.py bref --season 2026          load the Pioneer League from Baseball Reference
     python cli.py transactions-file           load transactions pasted into data/transactions/*.txt
     python cli.py rebuild-status              recompute every player's signing status
-    python cli.py refresh                     what the two week schedule runs
+    python cli.py refresh                     rerun the Baseball Reference load and statuses
     python cli.py doctor <url>                show what the parser sees on a page (no database needed)
                                               works on stat lists, rosters, game logs, and transaction pages
 """
@@ -127,7 +127,7 @@ def cmd_rebuild_status(_args):
 
 def cmd_refresh(_args):
     """
-    What the biweekly schedule runs: the latest season from Baseball Reference (team pages every
+    Rerun the latest season from Baseball Reference (team pages every
     time, player pages only when new or a month old), then the pasted transactions and statuses.
     The league site scraper (`pioneer`) stays available for if the league grants access.
     """

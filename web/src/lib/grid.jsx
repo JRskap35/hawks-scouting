@@ -39,7 +39,7 @@ function NameCell({ data, context }) {
   return (
     <span className="namecell">
       <button type="button" className="namelink" onClick={() => context.openPlayer(data.id)}>{data.full_name}</button>
-      <StatusBadge player={data} />
+      <StatusBadge player={data} edit={context.statusEdit} />
     </span>
   )
 }
@@ -62,7 +62,9 @@ export function leadColumns(narrow = false, { role = false } = {}) {
     { headerName: '', field: 'marker', width: 52, pinned: pin, sortable: true, resizable: false,
       cellRenderer: MarkerCell, cellClass: 'cell-marker', comparator: nullsLast, headerTooltip: 'Marker',
       exportValue: (r) => markerLabel(r.marker) },
-    { headerName: 'Name', field: 'full_name', width: 250, pinned: pin, cellRenderer: NameCell,
+    // The value includes the status, so the cell redraws when a badge is edited.
+    { headerName: 'Name', colId: 'full_name', width: 250, pinned: pin, cellRenderer: NameCell,
+      valueGetter: (p) => `${p.data.full_name}|${p.data.status_label}|${p.data.status_team ?? ''}|${p.data.status_by_staff ? 1 : 0}|${p.data.status_note ?? ''}`,
       comparator: (a, b, na, nb) => (na.data.last_name ?? '').localeCompare(nb.data.last_name ?? ''),
       exportValue: (r) => r.full_name, exportExtra: [{ label: 'Status', value: (r) => r.status_label }] },
     { headerName: 'Team', field: 'team', width: 185, cellRenderer: TeamCell, comparator: nullsLast, tooltipField: 'team',

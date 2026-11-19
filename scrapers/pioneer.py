@@ -243,7 +243,8 @@ def store_transactions(conn, lines: list[str], season: int, source_id: int, url:
             summary["unclassified"].append(t.raw_text)
             continue
 
-        header_team_id = db.find_team(conn, t.team) if t.team else None
+        # The team header is the club making the move; add it if it is not loaded yet.
+        header_team_id = (db.find_team(conn, t.team) or db.get_or_create_team(conn, t.team, "independent")) if t.team else None
         cp_id = None
         if t.counterparty:
             cp_id = db.find_team(conn, t.counterparty) or db.get_or_create_team(

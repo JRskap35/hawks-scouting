@@ -14,6 +14,6 @@ The site shows made up demo players until the database is connected.
 | `scrapers/` | Loads players and stats from Baseball Reference, and parses transactions |
 | `data/transactions/` | The league's transaction page, pasted in (see the README there) |
 | `db/` | Database tables and login rules |
-| `.github/workflows/` | Publishes the site and refreshes the data every two weeks |
+| `.github/workflows/` | Publishes the site, loads the data, and loads pasted transactions |
 
 Setup steps are in [docs/SETUP.md](docs/SETUP.md).

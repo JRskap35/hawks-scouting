@@ -113,6 +113,25 @@ export default function App() {
     }
   }, [lists])
 
+  // ---- status edits (optimistic, rolled back if the save fails) ------------
+  const saveStatus = useCallback(async (id, newStatus, team, note) => {
+    const before = [...(lists?.hitters ?? []), ...(lists?.pitchers ?? []), ...(lists?.twoWay ?? [])].find((r) => r.id === id)
+    const keys = ['status', 'status_label', 'status_team', 'status_date', 'unconfirmed', 'can_sign_now', 'status_by_staff', 'status_set_by', 'status_note', 'team']
+    const prev = Object.fromEntries(keys.map((k) => [k, before?.[k] ?? null]))
+    const label = newStatus === 'free_agent' ? 'Free Agent' : newStatus === 'signed_independent' ? 'Signed' : 'Unconfirmed'
+    patchPlayer(id, { status_label: label, status_team: team, status_by_staff: true })
+    try {
+      const saved = await api.setStatus(id, newStatus, team, note)
+      if (saved) patchPlayer(id, saved)
+      say(`${before?.full_name ?? 'Player'} is now ${label}${team ? ` with ${team}` : ''}`)
+      return true
+    } catch (e) {
+      patchPlayer(id, prev)
+      say(`Status not saved: ${e.message}`, 'error')
+      return false
+    }
+  }, [lists])
+
   // ---- rows for the current page --------------------------------------------
   const allPlayers = useMemo(() => {
     if (!lists) return []
@@ -120,6 +139,9 @@ export default function App() {
     for (const r of [...lists.hitters, ...lists.pitchers, ...lists.twoWay]) if (!m.has(r.id)) m.set(r.id, r)
     return [...m.values()]
   }, [lists])
+
+  const teamNames = useMemo(() => [...new Set(allPlayers.flatMap((p) => [p.team, p.status_team]).filter(Boolean))].sort(), [allPlayers])
+  const statusEdit = useMemo(() => ({ save: saveStatus, loadHistory: (id) => api.loadStatusHistory(id), teamNames }), [saveStatus, teamNames])
 
   const scoutedRows = useMemo(() => allPlayers.filter((p) => p.marker).map((p) => ({ ...p, line: lineFor(p, lists) })), [allPlayers, lists])
   const stats = PAGE_STATS[page] ?? []
@@ -131,7 +153,8 @@ export default function App() {
     const g = group[page]
     if (page === 'hitters' && g !== 'all') r = r.filter((x) => x.position_group === g)
     if (page === 'pitchers' && g !== 'all') r = r.filter((x) => x.pitcher_role === g)
-    if (status !== 'all') r = r.filter((x) => x.status_label === status)
+    if (status === 'staff') r = r.filter((x) => x.status_by_staff)
+    else if (status !== 'all') r = r.filter((x) => x.status_label === status)
     if (page === 'scouted' && markerFilter !== 'all') r = r.filter((x) => x.marker === markerFilter)
     for (const f of pageFilters) {
       r = r.filter((x) => {
@@ -172,7 +195,7 @@ export default function App() {
     return bits.join(', ')
   }
   const exportSubtitle = () => [
-    status !== 'all' ? status : null,
+    status === 'staff' ? 'Changed by staff' : status !== 'all' ? status : null,
     ...pageFilters.map((f) => filterText(f, stats.find((s) => s.key === f.key))),
   ].filter(Boolean).join(', ') || 'No filters'
 
@@ -204,6 +227,7 @@ export default function App() {
             <option value="Free Agent">Free agents</option>
             <option value="Signed">Signed</option>
             <option value="Unconfirmed">Unconfirmed</option>
+            <option value="staff">Changed by staff</option>
           </select>
         </label>
         {page === 'scouted' && (
@@ -263,7 +287,7 @@ export default function App() {
             rowData={rows}
             columnDefs={columnDefs}
             getRowId={(p) => String(p.data.id)}
-            context={{ openPlayer: setOpenId, setMarker }}
+            context={{ openPlayer: setOpenId, setMarker, statusEdit }}
             defaultColDef={{ sortable: true, resizable: true, suppressMovable: false }}
             onGridReady={(e) => { gridApi.current = e.api }}
             onRowDoubleClicked={(e) => setOpenId(e.data.id)}
@@ -279,7 +303,7 @@ export default function App() {
       </footer>
 
       {openId != null && (
-        <PlayerModal api={api} playerId={openId} listRow={openRow} onClose={() => setOpenId(null)} setMarker={setMarker}
+        <PlayerModal api={api} playerId={openId} listRow={openRow} onClose={() => setOpenId(null)} setMarker={setMarker} statusEdit={statusEdit}
           startView={openRow?.position_group === 'P' && !openRow?.is_two_way ? 'pitching' : 'batting'} />
       )}
       {toast && <div className={`toast toast-${toast.kind}`} role="status">{toast.text}</div>}

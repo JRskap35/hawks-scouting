@@ -46,8 +46,9 @@ requests. Transactions are pasted in from the league page.
 3. Paste the 2027 transactions: follow `data/transactions/README.md`. Saving the file updates every
    player's badge.
 
-After this, **Biweekly refresh** re-reads the team pages every other Monday (player pages once a
-month), and the badges update whenever you paste the transaction page again.
+Stats load once. Rerun **First load** any time you want them re-read (player pages read in the last
+month are skipped). Badges update whenever you paste the transaction page again, and anyone on staff
+can change a badge by clicking it.
 
 ### What comes from where
 
@@ -56,7 +57,7 @@ month), and the badges update whenever you paste the transaction page again.
 | Players, season stats, team | Baseball Reference team pages |
 | Bats, throws, height, weight, birth date, birthplace, high school | Baseball Reference roster and player pages |
 | College and graduation year, past seasons, college fielding | Baseball Reference player pages (final college season) |
-| Free Agent, Signed, Unconfirmed | Pasted league transactions |
+| Free Agent, Signed, Unconfirmed | Pasted league transactions, plus staff edits on the site |
 | Game logs, Pioneer League fielding | Not available yet: only the league site has them |
 
 ## 5. Add the staff

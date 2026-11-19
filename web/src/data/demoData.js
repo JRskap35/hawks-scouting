@@ -207,6 +207,7 @@ export function buildDemo(seed = 2027) {
   const players = []
   const batting = {}, pitching = {}, fielding = {}
   const battingGames = {}, pitchingGames = {}        // [playerId][season] -> games
+  const history = {}                                  // [playerId] -> status moves, oldest first
   let id = 1
 
   const make = (kind) => {
@@ -291,7 +292,16 @@ export function buildDemo(seed = 2027) {
     // Team column: 2027 club if signed, otherwise the last professional team, otherwise none.
     const lastPro = [...(batting[p.id] ?? []), ...(pitching[p.id] ?? [])]
       .filter((x) => x.leagues === 'Pioneer League').sort((a, b) => b.season - a.season)[0]
-    p.team = p.status_team ?? lastPro?.teams ?? null
+    p.last_pro_team = lastPro?.teams ?? null
+    p.team = p.status_team ?? p.last_pro_team
+    // League moves behind the badge, for the status history
+    if (p.status !== 'unknown') {
+      history[p.id] = [{
+        id: p.id * 10, txn_date: p.status_date, by_staff: false,
+        raw_text: p.status === 'signed_independent' ? `Signed ${p.full_name} to their 2027 roster`
+          : p.grad_year === 2026 && !lastPro ? 'Graduated, no pro contract on record' : `Placed ${p.full_name} on Irrevocable waivers`,
+      }]
+    }
     players.push(p)
   }
 
@@ -306,5 +316,5 @@ export function buildDemo(seed = 2027) {
     p.marker_set_by = ['Joe', 'Area scout', 'Pitching coach'][i % 3]
   })
 
-  return { players, batting, pitching, fielding, battingGames, pitchingGames }
+  return { players, batting, pitching, fielding, battingGames, pitchingGames, history }
 }

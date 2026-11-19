@@ -294,62 +294,9 @@ def match_player(idx: dict, name: str, team_hint: Iterable[str] = ()) -> Optiona
     return None
 
 
-REBUILD_STATUS_SQL = """
--- Status is for ONE upcoming season (the target season). Only that season's transaction report
--- (October of the prior year onward) can confirm a player as signed for it.
---
---   * Latest move in the target season's report decides.
---   * With no move in that report, a few earlier moves still stand because nothing has
---     undone them yet: a release (free agent), a contract sold to an MLB club (affiliated),
---     a retirement. An earlier signing or trade does NOT carry over: a roster spot last
---     season says nothing about next season, so the player is unconfirmed.
---   * No moves at all: unconfirmed.
-WITH latest_txn AS (
-    SELECT DISTINCT ON (player_id)
-           player_id, id, txn_date, status_effect, to_team_id,
-           EXTRACT(YEAR FROM txn_date)::int
-             + CASE WHEN EXTRACT(MONTH FROM txn_date) >= 10 THEN 1 ELSE 0 END AS txn_season
-    FROM transactions
-    WHERE player_id IS NOT NULL AND status_effect IS NOT NULL
-    ORDER BY player_id, txn_date DESC, id DESC
-),
-resolved AS (
-    SELECT p.id AS player_id,
-           CASE WHEN lt.txn_season >= %(target)s THEN true
-                WHEN lt.status_effect IN ('free_agent', 'signed_affiliated', 'retired') THEN true
-                ELSE false END AS known,
-           lt.id, lt.txn_date, lt.status_effect, lt.to_team_id
-    FROM players p
-    LEFT JOIN latest_txn lt ON lt.player_id = p.id
-)
-INSERT INTO player_status (player_id, status, current_team_id, status_date, for_season,
-                           last_txn_id, unconfirmed, updated_at)
-SELECT r.player_id,
-       CASE WHEN known THEN r.status_effect ELSE 'unknown'::signing_status END,
-       CASE WHEN known AND r.status_effect IN ('signed_independent', 'signed_affiliated') THEN r.to_team_id END,
-       CASE WHEN known THEN r.txn_date END,
-       %(target)s,
-       CASE WHEN known THEN r.id END,
-       NOT known,
-       now()
-FROM resolved r
-ON CONFLICT (player_id) DO UPDATE
-   SET status = EXCLUDED.status,
-       current_team_id = EXCLUDED.current_team_id,
-       status_date = EXCLUDED.status_date,
-       for_season = EXCLUDED.for_season,
-       last_txn_id = EXCLUDED.last_txn_id,
-       unconfirmed = EXCLUDED.unconfirmed,
-       updated_at = now()
-   -- Never overwrite a status another process set from better evidence (college return list).
-   WHERE player_status.status <> 'returning_college'
-"""
-
-
 def rebuild_status(conn, target_season: int) -> int:
-    """Recompute every player's status for the upcoming season."""
-    cur = conn.execute(REBUILD_STATUS_SQL, {"target": target_season})
-    return cur.rowcount
+    """Recompute every player's status for the upcoming season. The rules live in web.sql (rebuild_status)."""
+    return conn.execute("SELECT rebuild_status(%s) AS n", (target_season,)).fetchone()["n"]
 
 
 # ---------------------------------------------------------------------------

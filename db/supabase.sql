@@ -51,3 +51,8 @@ CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users
 INSERT INTO public.staff (user_id, full_name)
 SELECT id, COALESCE(raw_user_meta_data ->> 'full_name', split_part(email, '@', 1)) FROM auth.users
 ON CONFLICT (user_id) DO NOTHING;
+
+-- 5. Status edits from the site go through set_player_status, which signed out visitors cannot call.
+--    (The function also checks for a signed in user itself, so rebuilding it later stays safe.)
+REVOKE EXECUTE ON FUNCTION public.set_player_status(integer, text, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.set_player_status(integer, text, text, text) TO authenticated;
