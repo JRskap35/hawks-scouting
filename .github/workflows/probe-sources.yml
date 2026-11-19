@@ -1,0 +1,28 @@
+# Checks which data sources the scraper can reach from GitHub's servers.
+# Runs when the probe changes, or by hand from the Actions tab.
+
+name: Probe data sources
+
+on:
+  push:
+    branches: [main]
+    paths: ["scrapers/probe.py", ".github/workflows/probe-sources.yml"]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SCRAPER_CONTACT: ${{ secrets.SCRAPER_CONTACT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe
+        run: |
+          python -m scrapers.probe | tee output.txt
+          { echo '### Data source probe'; echo '```'; grep -v '^JSON:' output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
