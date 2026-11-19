@@ -314,6 +314,7 @@ def run(conn, http: PoliteSession, season: int, cfg: LeagueConfig = PIONEER,
     txn_seasons = txn_seasons if txn_seasons is not None else (target_season,)
     source_id = db.get_or_create_source(conn, f"{cfg.name} site", cfg.site, priority=10)
     league_id = db.get_or_create_league(conn, cfg.name, cfg.org, cfg.level, cfg.abbrev, cfg.site)
+    db.mark_league_complete(conn, league_id)       # every player in the league gets loaded
     conn.commit()
 
     result: dict = {}

@@ -40,7 +40,7 @@ CREATE TRIGGER player_markers_log
 -- ------------------------------------------------------------
 -- League FIP constants, from each league's own totals
 --   cFIP = lgERA - (13*HR + 3*(BB+HBP) - 2*K) / IP
--- Only trustworthy when the whole league is loaded (true for the Pioneer League).
+-- Only calculated for leagues marked complete (every player loaded), such as the Pioneer League.
 -- ------------------------------------------------------------
 
 CREATE OR REPLACE VIEW league_fip_constants WITH (security_invoker = true) AS
@@ -52,17 +52,21 @@ SELECT ts.league_id, ps.season,
                / NULLIF(SUM(ps.outs) / 3.0, 0), 3) AS fip_constant
 FROM pitching_stats ps
 JOIN team_seasons ts ON ts.team_id = ps.team_id AND ts.season = ps.season
+JOIN leagues lg ON lg.id = ts.league_id AND lg.complete     -- partial leagues would skew the constant
 WHERE ps.split = 'total'
 GROUP BY ts.league_id, ps.season;
 
 
 -- ------------------------------------------------------------
--- Season lines (one row per player per season, all clubs combined)
+-- Season lines: one row per player, season, and league (clubs in the same league combined).
+-- Split by league so a 2026 college senior who signed in the summer keeps his college and pro
+-- numbers apart. is_pro marks independent and affiliated leagues.
 -- ------------------------------------------------------------
 
 CREATE OR REPLACE VIEW ui_batting_seasons WITH (security_invoker = true) AS
 WITH raw AS (
-    SELECT b.player_id, b.season,
+    SELECT b.player_id, b.season, COALESCE(ts.league_id, 0) AS league_key,
+           bool_or(t.org IN ('independent', 'affiliated')) AS is_pro,
            string_agg(DISTINCT t.name, ', ') AS teams,
            string_agg(DISTINCT l.name, ', ') AS leagues,
            SUM(b.g) AS g,
@@ -75,7 +79,7 @@ WITH raw AS (
     LEFT JOIN team_seasons ts ON ts.team_id = b.team_id AND ts.season = b.season
     LEFT JOIN leagues l ON l.id = ts.league_id
     WHERE b.split = 'total'
-    GROUP BY b.player_id, b.season
+    GROUP BY b.player_id, b.season, COALESCE(ts.league_id, 0)
 )
 SELECT r.*,
        ROUND(h::numeric / NULLIF(ab, 0), 3) AS avg,
@@ -88,12 +92,13 @@ SELECT r.*,
        ROUND(100.0 * so / NULLIF(pa, 0), 1) AS k_pct,
        ROUND(100.0 * bb / NULLIF(pa, 0), 1) AS bb_pct,
        (pa < 100) AS small_sample,
-       (SELECT count(*) FROM batting_games g WHERE g.player_id = r.player_id AND g.season = r.season) AS games_logged
+       CASE WHEN is_pro THEN (SELECT count(*) FROM batting_games g WHERE g.player_id = r.player_id AND g.season = r.season)
+            ELSE 0 END AS games_logged
 FROM raw r;
 
 CREATE OR REPLACE VIEW ui_pitching_seasons WITH (security_invoker = true) AS
 WITH rows AS (
-    SELECT p.*, t.name AS team, l.name AS league, c.fip_constant
+    SELECT p.*, t.name AS team, t.org AS team_org, l.name AS league, COALESCE(ts.league_id, 0) AS league_key, c.fip_constant
     FROM pitching_stats p
     JOIN teams t ON t.id = p.team_id
     LEFT JOIN team_seasons ts ON ts.team_id = p.team_id AND ts.season = p.season
@@ -102,7 +107,8 @@ WITH rows AS (
     WHERE p.split = 'total'
 ),
 raw AS (
-    SELECT player_id, season,
+    SELECT player_id, season, league_key,
+           bool_or(team_org IN ('independent', 'affiliated')) AS is_pro,
            string_agg(DISTINCT team, ', ') AS teams,
            string_agg(DISTINCT league, ', ') AS leagues,
            SUM(w) AS w, SUM(l) AS l, SUM(g) AS g, SUM(COALESCE(gs,0)) AS gs, SUM(sv) AS sv,
@@ -111,9 +117,9 @@ raw AS (
            -- IP weighted league constant, so a pitcher who changed leagues gets a fair blend
            SUM(fip_constant * outs) / NULLIF(SUM(outs) FILTER (WHERE fip_constant IS NOT NULL), 0) AS fip_c
     FROM rows
-    GROUP BY player_id, season
+    GROUP BY player_id, season, league_key
 )
-SELECT player_id, season, teams, leagues, w, l, g, gs, sv, outs, bf, h, r, er, hr, bb, so, hbp,
+SELECT player_id, season, league_key, is_pro, teams, leagues, w, l, g, gs, sv, outs, bf, h, r, er, hr, bb, so, hbp,
        -- display innings in baseball notation: 45.2 means 45 and two thirds
        (outs / 3) + (outs % 3) / 10.0 AS ip,
        ROUND(9.0 * er / NULLIF(outs / 3.0, 0), 2) AS era,
@@ -126,11 +132,12 @@ SELECT player_id, season, teams, leagues, w, l, g, gs, sv, outs, bf, h, r, er, h
        ROUND(100.0 * (so - bb) / NULLIF(bf, 0), 1) AS k_bb_pct,
        ROUND((13.0 * hr + 3.0 * (bb + hbp) - 2.0 * so) / NULLIF(outs / 3.0, 0) + fip_c, 2) AS fip,
        (outs < 90) AS small_sample,                               -- under 30 IP
-       (SELECT count(*) FROM pitching_games g WHERE g.player_id = raw.player_id AND g.season = raw.season) AS games_logged
+       CASE WHEN is_pro THEN (SELECT count(*) FROM pitching_games g WHERE g.player_id = raw.player_id AND g.season = raw.season)
+            ELSE 0 END AS games_logged
 FROM raw;
 
 CREATE OR REPLACE VIEW ui_fielding_seasons WITH (security_invoker = true) AS
-SELECT f.player_id, f.season, f.position,
+SELECT f.player_id, f.season, f.position, COALESCE(ts.league_id, 0) AS league_key,
        string_agg(DISTINCT t.name, ', ') AS teams,
        SUM(f.g) AS g, SUM(f.outs) AS outs, SUM(f.po) AS po, SUM(f.a) AS a, SUM(f.e) AS e, SUM(f.dp) AS dp,
        SUM(f.pb) AS pb, SUM(f.sb_against) AS sb_against, SUM(f.cs_by) AS cs_by,
@@ -138,7 +145,8 @@ SELECT f.player_id, f.season, f.position,
        ROUND(100.0 * SUM(f.cs_by) / NULLIF(SUM(f.sb_against) + SUM(f.cs_by), 0), 1) AS cs_pct
 FROM fielding_stats f
 JOIN teams t ON t.id = f.team_id
-GROUP BY f.player_id, f.season, f.position;
+LEFT JOIN team_seasons ts ON ts.team_id = f.team_id AND ts.season = f.season
+GROUP BY f.player_id, f.season, f.position, COALESCE(ts.league_id, 0);
 
 
 -- ------------------------------------------------------------
@@ -176,6 +184,7 @@ SELECT e.id, e.first_name, e.last_name, e.full_name,
        END AS position_group,
        e.bats, e.throws, e.height_in, e.weight_lb,
        concat_ws(', ', e.hometown_city, e.hometown_state) AS hometown,
+       e.high_school,
        e.grad_year,
        col.name AS college,
        -- Team column: his 2027 club if signed, otherwise the last professional team he played for.
@@ -221,14 +230,14 @@ CREATE OR REPLACE VIEW ui_hitters WITH (security_invoker = true) AS
 SELECT pl.*, b.season, b.teams, b.leagues, b.g, b.pa, b.ab, b.r, b.h, b.b2, b.b3, b.hr, b.rbi, b.bb, b.so,
        b.sb, b.cs, b.avg, b.obp, b.slg, b.ops, b.iso, b.babip, b.k_pct, b.bb_pct, b.small_sample
 FROM ui_players pl
-JOIN LATERAL (SELECT * FROM ui_batting_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC LIMIT 1) b ON true
+JOIN LATERAL (SELECT * FROM ui_batting_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC, s.is_pro DESC, s.pa DESC LIMIT 1) b ON true
 WHERE pl.position_group IS DISTINCT FROM 'P' OR pl.is_two_way;
 
 CREATE OR REPLACE VIEW ui_pitchers WITH (security_invoker = true) AS
 SELECT pl.*, p.season, p.teams, p.leagues, p.w, p.l, p.g, p.gs, p.sv, p.ip, p.outs, p.h, p.er, p.hr, p.bb, p.so,
        p.era, p.whip, p.k9, p.bb9, p.hr9, p.k_pct, p.bb_pct, p.k_bb_pct, p.fip, p.small_sample
 FROM ui_players pl
-JOIN LATERAL (SELECT * FROM ui_pitching_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC LIMIT 1) p ON true
+JOIN LATERAL (SELECT * FROM ui_pitching_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC, s.is_pro DESC, s.outs DESC LIMIT 1) p ON true
 WHERE pl.position_group = 'P' OR pl.position_group IS NULL OR pl.is_two_way;
 
 CREATE OR REPLACE VIEW ui_two_way WITH (security_invoker = true) AS
@@ -237,6 +246,6 @@ SELECT pl.*,
        b.season AS bat_season, b.pa, b.avg, b.obp, b.slg, b.ops, b.hr, b.sb,
        p.season AS pit_season, p.ip, p.outs, p.era, p.whip, p.fip, p.so AS p_so, p.k9
 FROM ui_players pl
-LEFT JOIN LATERAL (SELECT * FROM ui_batting_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC LIMIT 1) b ON true
-LEFT JOIN LATERAL (SELECT * FROM ui_pitching_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC LIMIT 1) p ON true
+LEFT JOIN LATERAL (SELECT * FROM ui_batting_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC, s.is_pro DESC, s.pa DESC LIMIT 1) b ON true
+LEFT JOIN LATERAL (SELECT * FROM ui_pitching_seasons s WHERE s.player_id = pl.id ORDER BY s.season DESC, s.is_pro DESC, s.outs DESC LIMIT 1) p ON true
 WHERE pl.is_two_way;

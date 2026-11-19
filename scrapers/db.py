@@ -17,7 +17,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 DB_DIR = os.path.join(os.path.dirname(__file__), "..", "db")
-SCHEMA_FILES = ["schema.sql", "web.sql"]      # supabase.sql is run separately in the Supabase SQL editor
+SCHEMA_FILES = ["schema.sql", "migrations.sql", "web.sql"]   # supabase.sql runs separately, in Supabase
 
 BATTING_COLS = ["g", "pa", "ab", "r", "h", "b2", "b3", "hr", "rbi", "bb", "ibb", "so",
                 "hbp", "sf", "sh", "sb", "cs", "gdp"]
@@ -36,7 +36,7 @@ def connect(url: Optional[str] = None) -> psycopg.Connection:
 def init_schema(conn: psycopg.Connection) -> str:
     """
     First run: create everything. Later runs: the tables already hold data, so only the
-    views in web.sql are rebuilt (they are safe to drop and recreate). Returns what it did.
+    rerunnable files run: migrations.sql (new columns) and web.sql (views). Returns what it did.
     """
     exists = conn.execute("SELECT to_regclass('public.players') IS NOT NULL AS e").fetchone()["e"]
     files = SCHEMA_FILES[1:] if exists else SCHEMA_FILES
@@ -79,6 +79,10 @@ def get_or_create_league(conn, name: str, org: str, level: str, abbrev: str | No
            ON CONFLICT (name, level) DO UPDATE SET website = COALESCE(EXCLUDED.website, leagues.website)
            RETURNING id""", (name, abbrev, org, level, website)).fetchone()
     return row["id"]
+
+
+def mark_league_complete(conn, league_id: int):
+    conn.execute("UPDATE leagues SET complete = true WHERE id = %s", (league_id,))
 
 
 def get_or_create_team(conn, name: str, org: str, site_url: str | None = None) -> int:

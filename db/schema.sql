@@ -45,7 +45,7 @@ CREATE TYPE comp_level AS ENUM (
     'mlb', 'aaa', 'aa', 'high_a', 'single_a', 'complex',
     'independent', 'mlb_partner',
     'ncaa_d1', 'ncaa_d2', 'ncaa_d3', 'naia', 'juco',
-    'summer_collegiate'
+    'summer_collegiate', 'ncaa'
 );
 
 -- Leagues AND college conferences live here (SEC, Big West, Pioneer League, Frontier League...).
@@ -56,6 +56,7 @@ CREATE TABLE leagues (
     org         org_type NOT NULL,
     level       comp_level NOT NULL,
     website     text,
+    complete    boolean NOT NULL DEFAULT false,   -- every player in the league is loaded
     UNIQUE (name, level)
 );
 
@@ -145,6 +146,7 @@ CREATE TABLE players (
     throws           hand,
     hometown_city    text,
     hometown_state   text,
+    high_school      text,
     primary_position text,              -- 'C','1B','2B','3B','SS','LF','CF','RF','DH','P'
     -- Manual overrides. NULL means "use the stat based rule" (see player_classification view).
     role_override    text CHECK (role_override IN ('SP','RP')),
@@ -165,6 +167,7 @@ CREATE TABLE player_external_ids (
     source_id    integer REFERENCES sources(id),
     external_id  text NOT NULL,
     profile_url  text,
+    fetched_at   timestamptz,                -- when the player's own page was last read
     PRIMARY KEY (source_id, external_id)
 );
 

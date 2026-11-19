@@ -6,7 +6,7 @@ name: Probe data sources
 on:
   push:
     branches: [main]
-    paths: ["scrapers/probe.py", ".github/workflows/probe-sources.yml"]
+    paths: ["scrapers/probe.py", "scrapers/bref.py", ".github/workflows/probe-sources.yml"]
   workflow_dispatch:
 
 jobs:
@@ -24,5 +24,5 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Probe
         run: |
-          python -m scrapers.probe --bref | tee output.txt
-          { echo '### Baseball Reference register'; echo '```'; cat output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python cli.py bref-check | tee output.txt
+          { echo '### Baseball Reference parser check'; echo '```'; cat output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

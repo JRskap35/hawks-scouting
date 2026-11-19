@@ -34,7 +34,24 @@ def current_season() -> int:
 def cmd_init_db(_args):
     with db.connect() as conn:
         did = db.init_schema(conn)
-    print("Tables and views created." if did == "created" else "Tables already exist. Views rebuilt; no data touched.")
+    print("Tables and views created." if did == "created" else "Tables already exist. New columns added and views rebuilt; no data touched.")
+
+
+def cmd_bref(args):
+    from scrapers import bref
+    with db.connect() as conn:
+        source_id = db.get_or_create_source(conn, bref.SOURCE_NAME, bref.BASE, priority=1)
+        with db.scrape_run(conn, source_id) as tally:
+            result = bref.load_league_season(conn, PoliteSession(), bref.PIONEER, args.season, tally,
+                                             players=not args.skip_players, force_players=args.force_players)
+            result["status_rows"] = db.rebuild_status(conn, pioneer.transaction_season())
+            result["errors"] = list(tally["errors"])
+    print(json.dumps(result, indent=2, default=str))
+
+
+def cmd_bref_check(args):
+    from scrapers import bref
+    print(bref.check(PoliteSession(), bref.PIONEER, args.season))
 
 
 def cmd_check_site(args):
@@ -124,6 +141,16 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("init-db").set_defaults(fn=cmd_init_db)
+
+    s = sub.add_parser("bref", help="load a league season from Baseball Reference")
+    s.add_argument("--season", type=int, default=current_season())
+    s.add_argument("--skip-players", action="store_true", help="team pages only, no player pages (fast)")
+    s.add_argument("--force-players", action="store_true", help="re-read every player page, even recent ones")
+    s.set_defaults(fn=cmd_bref)
+
+    s = sub.add_parser("bref-check", help="read one page of each kind from Baseball Reference, no database needed")
+    s.add_argument("--season", type=int, default=current_season())
+    s.set_defaults(fn=cmd_bref_check)
 
     s = sub.add_parser("check-site", help="read one page of each kind from the league site, no database needed")
     s.add_argument("--season", type=int)
