@@ -252,12 +252,13 @@ export function buildDemo(seed = 2027) {
     if (kind !== 'P') {
       battingGames[p.id] = {}
       batting[p.id] = recent.map((s) => {
-        if (!isPro(s)) return hitSeason(rand, s.y, s.team, s.league, talent)
+        if (!isPro(s)) return { ...hitSeason(rand, s.y, s.team, s.league, talent), is_pro: false }
         const games = simHitGames(rand, s.y, s.team, opponents, talent)
         battingGames[p.id][s.y] = games
-        return battingFromGames(games, s.y, s.team, s.league)
+        return { ...battingFromGames(games, s.y, s.team, s.league), is_pro: true }
       }).reverse()
-      fielding[p.id] = recent.map((s) => {
+      // Like the live data: fielding exists for college seasons only, never for independent league seasons.
+      fielding[p.id] = recent.filter((s) => !isPro(s)).map((s) => {
         const g = batting[p.id].find((b) => b.season === s.y).g
         const po = Math.floor(g * (pos === 'C' ? 7 : pos === '1B' ? 8 : 2) * (0.8 + rand() * 0.4))
         const a = Math.floor(g * (['SS', '2B', '3B', 'INF'].includes(pos) ? 2.5 : 0.3) * (0.8 + rand() * 0.4))
@@ -273,12 +274,13 @@ export function buildDemo(seed = 2027) {
       const starter = kind === 'P' ? rand() < 0.45 : rand() < 0.3
       pitchingGames[p.id] = {}
       pitching[p.id] = recent.map((s, i) => {
-        if (!isPro(s)) return pitSeason(rand, s.y, s.team, s.league, starter, talent)
+        // like the live data: FIP is only calculated for leagues loaded in full, so college lines have none
+        if (!isPro(s)) return { ...pitSeason(rand, s.y, s.team, s.league, starter, talent), is_pro: false, fip: null }
         // two way players get enough relief outings to clear 20 IP in their latest season
         const minGames = kind === 'TW' && i === recent.length - 1 ? 24 : 0
         const games = simPitchGames(rand, s.y, s.team, opponents, starter, talent, minGames)
         pitchingGames[p.id][s.y] = games
-        return pitchingFromGames(games, s.y, s.team, s.league)
+        return { ...pitchingFromGames(games, s.y, s.team, s.league), is_pro: true }
       }).reverse()
       const ps = pitching[p.id].slice(0, 3)
       const w = [3, 2, 1]

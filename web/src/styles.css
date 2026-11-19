@@ -273,3 +273,20 @@ button, input, select { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- Not available: known data gaps ---------- */
+.is-na { color: #A3ADA6; font-style: italic; }
+.na-mini { margin-left: 5px; font: italic 500 11px var(--f-data); color: #9AA59D; text-decoration: none; display: inline-block; }
+.seasonlink-na { text-decoration-color: #C5CCC7; text-decoration-style: dotted; color: var(--ink-2); }
+.na-panel { display: grid; grid-template-columns: auto 1fr; gap: var(--s3); align-items: start;
+  background: #FFF8E1; border: 1px solid #EBD38A; border-radius: var(--radius); padding: var(--s3) var(--s4); }
+.na-panel p { margin: 0 0 6px; max-width: 70ch; font-size: 14px; color: var(--ink-2); }
+.na-panel p:last-child { margin-bottom: 0; }
+.na-title { font: 600 16px var(--f-data) !important; color: var(--ink) !important; }
+.na-tag { font: 600 12px/1 var(--f-data); padding: 5px 8px 4px; border-radius: 3px; background: var(--pole); color: var(--ink); white-space: nowrap; }
+.na-dialog { width: min(560px, 100%); gap: var(--s3); }
+.na-actions { display: flex; justify-content: flex-end; }
+.na-chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.na-chip { border: 1px dashed #D9B84A; background: #FFF8E1; color: var(--ink-2); border-radius: 14px; padding: 4px 10px;
+  font: 500 13px var(--f-data); cursor: pointer; }
+.na-chip:hover { border-style: solid; }

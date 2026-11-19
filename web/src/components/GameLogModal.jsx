@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { FORMATS } from '../data/columns.js'
 import { gridTheme, nullsLast } from '../lib/grid.jsx'
+import { statGap } from '../data/gaps.js'
 
 const shortDate = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 const opp = (r) => (r.opponent ? `${r.home_away === 'A' ? 'at ' : r.home_away === 'H' ? 'vs ' : ''}${r.opponent}` : '')
@@ -9,8 +10,9 @@ const ipFromOuts = (outs) => Math.floor(outs / 3) + (outs % 3) / 10
 
 const n = (key, label, opts = {}) => ({
   headerName: label, field: key, width: opts.width ?? 58, comparator: nullsLast,
-  cellClass: 'num', headerClass: 'num-h', headerTooltip: opts.title,
-  valueFormatter: opts.format ? (p) => FORMATS[opts.format](p.value) : undefined,
+  cellClass: (p) => `num ${p.value == null ? 'is-na' : ''}`, headerClass: 'num-h', headerTooltip: opts.title,
+  valueFormatter: (p) => (p.value == null ? (p.node?.rowPinned ? '' : 'n/a') : opts.format ? FORMATS[opts.format](p.value) : p.value),
+  tooltipValueGetter: (p) => (p.value == null && !p.node?.rowPinned ? statGap(key) : undefined),
 })
 
 const LEAD = [

@@ -60,6 +60,9 @@ can change a badge by clicking it.
 | Free Agent, Signed, Unconfirmed | Pasted league transactions, plus staff edits on the site |
 | Game logs, Pioneer League fielding | Not available yet: only the league site has them |
 
+Anything the site cannot get shows as **Not available** (or a grey n/a in a table), with the reason and
+what would fix it. The reasons live in `web/src/data/gaps.js`; update an entry there when a gap is fixed.
+
 ## 5. Add the staff
 
 In Supabase **Authentication**:

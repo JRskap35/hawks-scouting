@@ -2,6 +2,7 @@ import { themeQuartz } from 'ag-grid-community'
 import MarkerButton from '../components/MarkerButton.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { FORMATS, markerLabel } from '../data/columns.js'
+import { statGap } from '../data/gaps.js'
 
 export const gridTheme = themeQuartz.withParams({
   fontFamily: '"Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif',
@@ -101,9 +102,11 @@ export function statColumns(stats, { seasonField = 'season', teamsField = 'teams
       field: s.key,
       width: s.format === 'pct1' ? 74 : s.format === 'int' ? 60 : 70,
       headerTooltip: s.title ? `${s.label}: ${s.title}` : undefined,
-      valueFormatter: (p) => fmt(p.value),
+      // A blank number shows a grey n/a; hovering it gives the reason.
+      valueFormatter: (p) => (p.value == null && numeric && !p.node?.rowPinned ? 'n/a' : fmt(p.value)),
+      tooltipValueGetter: (p) => (p.value == null && numeric ? statGap(s.key) : undefined),
       comparator: nullsLast,
-      cellClass: (p) => [numeric ? 'num' : '', p.data?.small_sample && numeric ? 'is-small' : ''].join(' '),
+      cellClass: (p) => [numeric ? 'num' : '', p.data?.small_sample && numeric ? 'is-small' : '', p.value == null && numeric ? 'is-na' : ''].join(' '),
       headerClass: numeric ? 'num-h' : '',
       exportValue: (r) => fmt(r[s.key]),
     })
