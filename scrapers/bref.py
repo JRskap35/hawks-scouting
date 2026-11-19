@@ -324,6 +324,23 @@ def parse_player_page(html: str) -> PlayerPage:
             bio["schools"] = m.group(1).strip()
         page.bio = {k: v for k, v in bio.items() if v not in (None, "")}
 
+    # The player's roster table names each club and league in full ("State College Spikes",
+    # "MLB Draft League"), where the stat tables use short forms. Keyed by team season id.
+    full_names: dict[str, tuple[str, str]] = {}
+    for table in s.find_all("table"):
+        tid = (table.get("id") or "").lower()
+        if "roster" not in tid:
+            continue
+        headers = headers_of(table)
+        if "Tm" not in headers:
+            continue
+        ti, li = headers.index("Tm"), headers.index("Lg") if "Lg" in headers else None
+        for tr, cells in body_rows(table):
+            a = cells[ti].find("a", href=lambda h: h and "team.cgi" in h) if ti < len(cells) else None
+            if a:
+                lg = cells[li].get_text(" ", strip=True) if li is not None and li < len(cells) else ""
+                full_names[bref_id(a["href"])] = (a.get_text(" ", strip=True).replace("\xa0", " "), lg)
+
     for table in s.find_all("table"):
         tid = (table.get("id") or "").lower()
         group = "h" if "batting" in tid else "p" if "pitching" in tid else "f" if "fielding" in tid else None
@@ -331,7 +348,14 @@ def parse_player_page(html: str) -> PlayerPage:
             continue
         headers = headers_of(table)
         aliases = {"h": BAT, "p": PIT, "f": FLD}[group]
-        idx = {h: i for i, h in enumerate(headers)}
+        idx = {}
+        for i, h in enumerate(headers):
+            idx.setdefault(h, i)
+        if group == "f" and "Pos" not in idx and "Lev" in idx:
+            # the position column has no header label; it is the first blank header after Lev
+            blank = next((i for i, h in enumerate(headers) if h == "" and i > idx["Lev"]), None)
+            if blank is not None:
+                idx["Pos"] = blank
         for tr, cells in body_rows(table):
             def cell(name):
                 i = idx.get(name)
@@ -347,10 +371,13 @@ def parse_player_page(html: str) -> PlayerPage:
             stats = read_stats(cells, headers, aliases)
             if not stats:
                 continue
+            team_id_b = bref_id(team_a["href"])
+            full_team, full_league = full_names.get(team_id_b, (None, None))
             page.career.append(CareerRow(
-                group=group, season=year, team_name=team_a.get_text(" ", strip=True),
-                team_bref_id=bref_id(team_a["href"]),
-                league=lg_c.get_text(" ", strip=True) if lg_c else "",
+                group=group, season=year,
+                team_name=full_team or team_a.get_text(" ", strip=True).replace("\xa0", " "),
+                team_bref_id=team_id_b,
+                league=full_league or (lg_c.get_text(" ", strip=True) if lg_c else ""),
                 level=lev_c.get_text(" ", strip=True) if lev_c else "",
                 position=pos_c.get_text(" ", strip=True) if pos_c else None,
                 stats=stats,

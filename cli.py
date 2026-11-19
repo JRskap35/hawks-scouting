@@ -124,11 +124,12 @@ def cmd_rebuild_status(_args):
 
 
 def cmd_refresh(_args):
-    """Latest season's stats and bio pages, plus the upcoming season's transaction report."""
-    with db.connect() as conn:
-        result = pioneer.run(conn, PoliteSession(), pioneer.stats_season(),
-                             txn_seasons=(pioneer.transaction_season(),))
-    print(json.dumps(result, indent=2, default=str))
+    """
+    What the biweekly schedule runs: the latest season from Baseball Reference (team pages every
+    time, player pages only when new or a month old), then the pasted transactions and statuses.
+    The league site scraper (`pioneer`) stays available for if the league grants access.
+    """
+    cmd_bref(argparse.Namespace(season=pioneer.stats_season(), skip_players=False, force_players=False))
 
 
 def cmd_doctor(args):

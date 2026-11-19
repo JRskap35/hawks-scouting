@@ -36,13 +36,28 @@ site.
 
 ## 4. Load the data
 
-1. **Actions > Set up database > Run workflow**, task **Check the league site**. It reads one page of
-   each kind and marks each PASS, WARN, or FAIL on the run's summary page. If anything isn't PASS,
-   send that output over before going further.
-2. Run it again with task **First load**. With game logs it takes about half an hour.
-3. Run **Actions > Deploy site**. The site switches from demo players to a login page.
+Player stats come from Baseball Reference, because the Pioneer League site blocks automated
+requests. Transactions are pasted in from the league page.
 
-After this, **Biweekly refresh** keeps everything current every other Monday.
+1. **Actions > Set up database > Run workflow**, task **Check Baseball Reference**. It reads one
+   page of each kind and ends with PASS. If it doesn't, send that output over.
+2. Run it again with task **First load**. It reads every team page and every player's own page at
+   Baseball Reference's requested pace, so it takes about 45 minutes.
+3. Paste the 2027 transactions: follow `data/transactions/README.md`. Saving the file updates every
+   player's badge.
+
+After this, **Biweekly refresh** re-reads the team pages every other Monday (player pages once a
+month), and the badges update whenever you paste the transaction page again.
+
+### What comes from where
+
+| On the site | Source |
+| --- | --- |
+| Players, season stats, team | Baseball Reference team pages |
+| Bats, throws, height, weight, birth date, birthplace, high school | Baseball Reference roster and player pages |
+| College and graduation year, past seasons, college fielding | Baseball Reference player pages (final college season) |
+| Free Agent, Signed, Unconfirmed | Pasted league transactions |
+| Game logs, Pioneer League fielding | Not available yet: only the league site has them |
 
 ## 5. Add the staff
 
@@ -63,11 +78,12 @@ Everything the workflows do also runs locally:
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                   # paste in DATABASE_URL and your email
-python cli.py check-site               # no database needed
-python cli.py init-db                  # rerunning only rebuilds the views
-python cli.py pioneer --season 2026    # full load, including game logs
-python cli.py transactions             # 2027 transactions only
+python cli.py bref-check               # no database needed
+python cli.py init-db                  # rerunning adds new columns and rebuilds the views
+python cli.py bref --season 2026       # full load from Baseball Reference
+python cli.py transactions-file        # load data/transactions/*.txt
 python cli.py rebuild-status           # recompute every 2027 status
+python cli.py check-site               # test the league site (blocked from cloud servers)
 ```
 
 ### How signing status works

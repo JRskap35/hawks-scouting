@@ -11,7 +11,8 @@ The site shows made up demo players until the database is connected.
 | Folder | What it is |
 | --- | --- |
 | `web/` | The website |
-| `scrapers/` | Pulls Pioneer League stats, rosters, and transactions |
+| `scrapers/` | Loads players and stats from Baseball Reference, and parses transactions |
+| `data/transactions/` | The league's transaction page, pasted in (see the README there) |
 | `db/` | Database tables and login rules |
 | `.github/workflows/` | Publishes the site and refreshes the data every two weeks |
 
